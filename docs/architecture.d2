@@ -1,0 +1,216 @@
+direction: right
+
+classes: {
+  box: {
+    style: {
+      border-radius: 8
+      fill: "#f8f9fa"
+      stroke: "#ced4da"
+      shadow: true
+      font-size: 14
+    }
+  }
+  highlight: {
+    style: {
+      border-radius: 8
+      fill: "#eef2ff"
+      stroke: "#6366f1"
+      stroke-width: 2
+      shadow: true
+      font-size: 14
+    }
+  }
+  storage: {
+    style: {
+      fill: "#fef3c7"
+      stroke: "#f59e0b"
+      stroke-width: 2
+      shadow: true
+      font-size: 14
+    }
+  }
+  target: {
+    style: {
+      fill: "#ecfdf5"
+      stroke: "#10b981"
+      stroke-width: 2
+      shadow: true
+      font-size: 14
+    }
+  }
+  security: {
+    style: {
+      fill: "#fef2f2"
+      stroke: "#ef4444"
+      stroke-width: 2
+      shadow: true
+      font-size: 13
+      font-color: "#991b1b"
+    }
+  }
+}
+
+title: mcp-secret-launcher Architecture {
+  shape: text
+  style: {
+    font-size: 22
+    font-color: "#1e293b"
+    bold: true
+  }
+}
+
+Client: {
+  class: box
+  User: {
+    shape: person
+    style: {
+      fill: "#e2e8f0"
+      stroke: "#64748b"
+    }
+  }
+  mcp.json: {
+    shape: document
+    tooltip: |md
+      MCP client config referencing
+      mcp-secret-launcher as the command
+    |
+    style: {
+      fill: "#e2e8f0"
+      stroke: "#64748b"
+    }
+  }
+}
+
+Launcher: mcp-secret-launcher {
+  class: highlight
+
+  CLI Parser: "(clap)" {
+    tooltip: "Parses subcommands: run, set, get, list, delete"
+  }
+
+  Command Dispatch: main::run() {
+    tooltip: "Routes parsed command to appropriate handler"
+  }
+
+  Keyring Ops: {
+    tooltip: |md
+      - load_secrets: read manifest → fetch each key
+      - store_secret: write key + update manifest
+      - delete_secret: remove key + update manifest
+      - list_keys_with_healing: verify & prune stale entries
+    |
+  }
+
+  Runner: {
+    tooltip: |md
+      - build_env: merge inherited env + secrets
+      - exec_command (Unix): execvp replaces process
+      - spawn_command (Windows): spawn + zeroize + wait
+    |
+  }
+
+  Masking: {
+    tooltip: "mask_value: >7 chars → first 7 + ...****"
+  }
+
+  Prompter: "(rpassword)" {
+    tooltip: "Secure terminal input for 'set' command"
+  }
+
+  Error Categorizer: {
+    tooltip: |md
+      Maps keyring crate errors to:
+      SecretNotFound, KeyringLocked,
+      KeyringUnavailable, InsufficientPermissions
+    |
+  }
+
+  CLI Parser -> Command Dispatch: Parsed Command
+  Command Dispatch -> Keyring Ops: run / set / get / delete / list
+  Command Dispatch -> Runner: run (after secrets loaded)
+  Command Dispatch -> Masking: get (mask output)
+  Command Dispatch -> Prompter: set (read secret)
+  Keyring Ops -> Error Categorizer: keyring errors
+}
+
+Security Layer: SecretString (secrecy crate) {
+  class: security
+  shape: hexagon
+  tooltip: |md
+    All secret values wrapped in SecretString.
+    Zeroized on drop. Never exposed in logs/debug.
+  |
+}
+
+Storage: OS Keyring {
+  class: storage
+  shape: cylinder
+
+  libsecret: "(Linux)" {
+    style: { font-size: 12 }
+  }
+  Keychain: "(macOS)" {
+    style: { font-size: 12 }
+  }
+  Credential Manager: "(Windows)" {
+    style: { font-size: 12 }
+  }
+}
+
+Target: MCP Server Process {
+  class: target
+  shape: rectangle
+  tooltip: "Child process launched with secrets injected as env vars"
+}
+
+# --- External connections ---
+
+Client.User -> Launcher.CLI Parser: run | set | get | list | delete {
+  style: {
+    stroke: "#64748b"
+    animated: true
+  }
+}
+
+Client.mcp.json -> Launcher.CLI Parser: command + args {
+  style: {
+    stroke: "#94a3b8"
+    stroke-dash: 5
+  }
+}
+
+Client.User -> Launcher.Prompter: Secure TTY input {
+  style: {
+    stroke: "#ef4444"
+    stroke-dash: 5
+  }
+}
+
+Launcher.Keyring Ops <-> Storage: Read / Write secrets & manifest {
+  style: {
+    stroke: "#f59e0b"
+    animated: true
+  }
+}
+
+Launcher.Keyring Ops -> Security Layer: Wrap values {
+  style: {
+    stroke: "#ef4444"
+    stroke-dash: 3
+  }
+}
+
+Launcher.Runner -> Security Layer: build_env wraps all values {
+  style: {
+    stroke: "#ef4444"
+    stroke-dash: 3
+  }
+}
+
+Launcher.Runner -> Target: exec (Unix) / spawn (Windows)\nwith injected env vars {
+  style: {
+    stroke: "#10b981"
+    stroke-width: 2
+    animated: true
+  }
+}

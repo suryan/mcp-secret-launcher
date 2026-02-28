@@ -1,0 +1,265 @@
+direction: down
+
+classes: {
+  step: {
+    style: {
+      fill: "#f1f5f9"
+      stroke: "#94a3b8"
+      border-radius: 8
+      shadow: true
+      font-size: 14
+    }
+  }
+  action: {
+    style: {
+      fill: "#e0e7ff"
+      stroke: "#6366f1"
+      border-radius: 8
+      shadow: true
+      stroke-width: 2
+      font-size: 14
+    }
+  }
+  decision: {
+    shape: diamond
+    style: {
+      fill: "#fef3c7"
+      stroke: "#f59e0b"
+      stroke-width: 2
+      shadow: true
+      font-size: 13
+    }
+  }
+  terminal: {
+    shape: oval
+    style: {
+      fill: "#f87171"
+      stroke: "#b91c1c"
+      font-color: white
+      shadow: true
+      font-size: 13
+    }
+  }
+  success: {
+    shape: oval
+    style: {
+      fill: "#10b981"
+      stroke: "#047857"
+      font-color: white
+      shadow: true
+      font-size: 13
+    }
+  }
+  error: {
+    shape: oval
+    style: {
+      fill: "#fca5a5"
+      stroke: "#dc2626"
+      font-color: "#7f1d1d"
+      shadow: true
+      font-size: 12
+    }
+  }
+  security: {
+    style: {
+      fill: "#fef2f2"
+      stroke: "#ef4444"
+      stroke-width: 2
+      border-radius: 8
+      shadow: true
+      font-size: 13
+    }
+  }
+}
+
+# ============================================================
+#  RUN COMMAND FLOW
+# ============================================================
+
+run_title: "'run' command flow" {
+  shape: text
+  style: {
+    font-size: 20
+    font-color: "#1e293b"
+    bold: true
+  }
+}
+
+Start: |md
+  mcp-secret-launcher run \\
+    --profile mcp-atlassian \\
+    -- uvx mcp-atlassian
+| {
+  class: terminal
+}
+
+Parse: Parse CLI arguments (clap) {
+  class: step
+}
+
+Manifest: Load profile manifest from keyring {
+  class: step
+}
+
+ManifestEmpty: Manifest empty? {
+  class: decision
+}
+
+ReadSecrets: Read each secret from keyring {
+  class: action
+}
+
+WrapSecrets: Wrap values in SecretString {
+  class: security
+}
+
+BuildEnv: build_env()\nMerge inherited env + secrets {
+  class: action
+}
+
+Platform: Platform? {
+  class: decision
+}
+
+ExecUnix: exec_command()\nexecvp replaces process {
+  class: action
+}
+
+SpawnWin: spawn_command()\nspawn child process {
+  class: action
+}
+
+Zeroize: drop(env)\nZeroize secrets in launcher memory {
+  class: security
+}
+
+WaitChild: child.wait()\nForward exit code {
+  class: step
+}
+
+Running: Target process running {
+  class: success
+}
+
+NoSecrets: Launch with no secrets {
+  class: step
+}
+
+ErrExit: Error → stderr + exit(1) {
+  class: error
+}
+
+# --- Run flow connections ---
+
+Start -> Parse {
+  style: { stroke: "#64748b" }
+}
+Parse -> Manifest: Extract --profile {
+  style: { stroke: "#64748b" }
+}
+Manifest -> ManifestEmpty {
+  style: { stroke: "#64748b" }
+}
+ManifestEmpty -> ReadSecrets: No {
+  style: { stroke: "#64748b" }
+}
+ManifestEmpty -> NoSecrets: Yes {
+  style: { stroke: "#94a3b8"; stroke-dash: 5 }
+}
+NoSecrets -> BuildEnv {
+  style: { stroke: "#94a3b8"; stroke-dash: 5 }
+}
+ReadSecrets -> WrapSecrets {
+  style: { stroke: "#ef4444"; stroke-dash: 3 }
+}
+ReadSecrets -> ErrExit: Secret missing from keyring {
+  style: { stroke: "#dc2626"; stroke-dash: 5 }
+}
+WrapSecrets -> BuildEnv {
+  style: { stroke: "#6366f1"; animated: true }
+}
+BuildEnv -> Platform {
+  style: { stroke: "#6366f1" }
+}
+Platform -> ExecUnix: Unix {
+  style: { stroke: "#10b981"; stroke-width: 2 }
+}
+Platform -> SpawnWin: Windows {
+  style: { stroke: "#6366f1"; stroke-width: 2 }
+}
+ExecUnix -> Running: Process replaced {
+  style: { stroke: "#10b981"; stroke-width: 2; animated: true }
+}
+SpawnWin -> Zeroize: Child started {
+  style: { stroke: "#ef4444"; stroke-dash: 3 }
+}
+Zeroize -> WaitChild {
+  style: { stroke: "#6366f1" }
+}
+WaitChild -> Running {
+  style: { stroke: "#10b981"; stroke-width: 2; animated: true }
+}
+
+# ============================================================
+#  SET COMMAND FLOW
+# ============================================================
+
+set_title: "'set' command flow" {
+  shape: text
+  style: {
+    font-size: 20
+    font-color: "#1e293b"
+    bold: true
+  }
+}
+
+set_start: |md
+  mcp-secret-launcher set \\
+    --profile myprofile \\
+    --key API_TOKEN
+| {
+  class: terminal
+}
+
+set_parse: Parse CLI arguments {
+  class: step
+}
+
+set_prompt: Prompt user via rpassword\n(secure TTY, no echo) {
+  class: security
+}
+
+set_wrap: Wrap input in SecretString {
+  class: security
+}
+
+set_store: store_secret()\nWrite to keyring {
+  class: action
+}
+
+set_manifest: Update profile manifest\n(append key if new) {
+  class: action
+}
+
+set_done: Secret stored ✓ {
+  class: success
+}
+
+set_start -> set_parse {
+  style: { stroke: "#64748b" }
+}
+set_parse -> set_prompt: Extract --profile, --key {
+  style: { stroke: "#64748b" }
+}
+set_prompt -> set_wrap {
+  style: { stroke: "#ef4444"; stroke-dash: 3 }
+}
+set_wrap -> set_store {
+  style: { stroke: "#6366f1"; animated: true }
+}
+set_store -> set_manifest {
+  style: { stroke: "#f59e0b" }
+}
+set_manifest -> set_done {
+  style: { stroke: "#10b981"; stroke-width: 2 }
+}
