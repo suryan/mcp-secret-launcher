@@ -79,7 +79,50 @@ mcp-secret-launcher delete --profile mcp-atlassian --key JIRA_API_TOKEN
 
 ## MCP JSON Integration
 
-Drop-in replacement for the `command` field in your `mcp.json`:
+### Example: Securing `mcp-atlassian`
+
+A typical `mcp-atlassian` config looks like this — with API tokens in plaintext:
+
+```json
+{
+  "mcpServers": {
+    "mcp-atlassian": {
+      "command": "uvx",
+      "args": ["mcp-atlassian"],
+      "env": {
+        "JIRA_URL": "https://mycompany.atlassian.net",
+        "JIRA_USERNAME": "user@example.com",
+        "JIRA_API_TOKEN": "ATATT3xFfGF0...",
+        "CONFLUENCE_URL": "https://mycompany.atlassian.net/wiki",
+        "CONFLUENCE_USERNAME": "user@example.com",
+        "CONFLUENCE_API_TOKEN": "ATATT3xFfGF0..."
+      }
+    }
+  }
+}
+```
+
+#### Step 1 — Store the secrets in the keyring
+
+```bash
+mcp-secret-launcher set --profile mcp-atlassian --key JIRA_API_TOKEN
+# Enter secret value: [hidden input]
+
+mcp-secret-launcher set --profile mcp-atlassian --key CONFLUENCE_API_TOKEN
+# Enter secret value: [hidden input]
+```
+
+#### Step 2 — Verify they were stored
+
+```bash
+mcp-secret-launcher list --profile mcp-atlassian
+# JIRA_API_TOKEN
+# CONFLUENCE_API_TOKEN
+```
+
+#### Step 3 — Update `mcp.json`
+
+Replace `command` and `args`, and remove the secret values from `env`:
 
 ```json
 {
@@ -88,15 +131,20 @@ Drop-in replacement for the `command` field in your `mcp.json`:
       "command": "mcp-secret-launcher",
       "args": ["run", "--profile", "mcp-atlassian", "--", "uvx", "mcp-atlassian"],
       "env": {
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
         "JIRA_URL": "https://mycompany.atlassian.net",
-        "JIRA_USERNAME": "user@example.com"
+        "JIRA_USERNAME": "user@example.com",
+        "CONFLUENCE_URL": "https://mycompany.atlassian.net/wiki",
+        "CONFLUENCE_USERNAME": "user@example.com"
       }
     }
   }
 }
 ```
 
-Non-secret env vars stay in `mcp.json` as usual. The launcher merges them with keyring secrets, where keyring values take precedence on name collision.
+> **Linux only:** `DBUS_SESSION_BUS_ADDRESS` is required so the launcher can reach the keyring daemon. IDEs like Kiro and VS Code often don't pass this to spawned processes. Run `echo $DBUS_SESSION_BUS_ADDRESS` in your terminal to get the correct value. On macOS and Windows this is not needed.
+
+Non-secret env vars (URLs, usernames) stay in `mcp.json` as usual. The key names you store with `--key` must match the environment variable names the target server expects. At launch, the launcher reads all keys for the profile from the OS keyring, merges them with the static `env` block, and execs the target command. Keyring values take precedence on name collision.
 
 ## Platform Support
 
@@ -107,6 +155,35 @@ Non-secret env vars stay in `mcp.json` as usual. The launcher merges them with k
 | Windows | Credential Manager | Spawn + wait + propagate exit code |
 
 Linux requires a running keyring daemon (e.g., `gnome-keyring-daemon`, KeePassXC). Headless environments like Docker need explicit daemon configuration.
+
+## Troubleshooting
+
+### `Keyring daemon not available` / `DBUS_SESSION_BUS_ADDRESS is missing`
+
+On Linux, the keyring backend uses D-Bus to communicate with the secret service daemon. When an IDE (Kiro, VS Code, Cursor, etc.) spawns MCP server processes, it often does **not** inherit the desktop session's `DBUS_SESSION_BUS_ADDRESS` variable.
+
+**Symptoms:**
+```
+Error: Keyring daemon not available. Ensure dbus-daemon (DBUS_SESSION_BUS_ADDRESS is missing) is running.
+```
+
+**Fix:** Add `DBUS_SESSION_BUS_ADDRESS` to the `env` block in your `mcp.json`:
+
+```bash
+# Find your value
+echo $DBUS_SESSION_BUS_ADDRESS
+# Typical output: unix:path=/run/user/1000/bus
+```
+
+Then add it to your config:
+```json
+"env": {
+  "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+  ...
+}
+```
+
+This is not needed on macOS or Windows.
 
 ## Security
 
