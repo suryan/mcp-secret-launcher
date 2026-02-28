@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-keyring = "3"
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 clap = { version = "4", features = ["derive"] }
 secrecy = "0.10"
 rpassword = "5"

@@ -18,6 +18,20 @@ MCP server configs (`~/.kiro/settings/mcp.json`) require API tokens in plaintext
 ### Execution Flow
 ![Flow Diagram](docs/flow.png)
 
+## Prerequisites
+
+### Linux (Ubuntu/Debian)
+
+The Secret Service backend requires DBus development libraries:
+
+```bash
+sudo apt install -y libdbus-1-dev pkg-config
+```
+
+### macOS / Windows
+
+No additional system dependencies required.
+
 ## Installation
 
 ```bash

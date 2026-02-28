@@ -6,6 +6,22 @@ use std::collections::HashMap;
 
 use crate::errors::{LauncherError, categorize};
 
+#[cfg(target_os = "linux")]
+fn check_linux_env() -> anyhow::Result<()> {
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        return Err(LauncherError::KeyringUnavailable {
+            daemon: "dbus-daemon (DBUS_SESSION_BUS_ADDRESS is missing)".to_string(),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn check_linux_env() -> anyhow::Result<()> {
+    Ok(())
+}
+
 /// Trait abstracting keyring access for testability.
 pub trait KeyringBackend {
     /// Retrieves a secret from the keyring.
@@ -98,6 +114,7 @@ pub struct OsKeyring;
 
 impl KeyringBackend for OsKeyring {
     fn get_secret(&self, profile: &str, key: &str) -> anyhow::Result<SecretString> {
+        check_linux_env()?;
         let entry = keyring::Entry::new(profile, key).map_err(|e| categorize(e, profile, key))?;
         let password = entry
             .get_password()
@@ -106,6 +123,7 @@ impl KeyringBackend for OsKeyring {
     }
 
     fn set_secret(&self, profile: &str, key: &str, value: &SecretString) -> anyhow::Result<()> {
+        check_linux_env()?;
         let entry = keyring::Entry::new(profile, key).map_err(|e| categorize(e, profile, key))?;
         entry
             .set_password(value.expose_secret())
@@ -114,6 +132,7 @@ impl KeyringBackend for OsKeyring {
     }
 
     fn delete_secret(&self, profile: &str, key: &str) -> anyhow::Result<()> {
+        check_linux_env()?;
         let entry = keyring::Entry::new(profile, key).map_err(|e| categorize(e, profile, key))?;
         entry
             .delete_credential()
@@ -122,6 +141,7 @@ impl KeyringBackend for OsKeyring {
     }
 
     fn get_manifest(&self, profile: &str) -> anyhow::Result<Vec<String>> {
+        check_linux_env()?;
         let user = format!("_manifest:{profile}");
         let entry = keyring::Entry::new("mcp-secret-launcher", &user)
             .map_err(|e| categorize(e, profile, "_manifest"))?;
@@ -136,6 +156,7 @@ impl KeyringBackend for OsKeyring {
     }
 
     fn set_manifest(&self, profile: &str, keys: &[String]) -> anyhow::Result<()> {
+        check_linux_env()?;
         let user = format!("_manifest:{profile}");
         let entry = keyring::Entry::new("mcp-secret-launcher", &user)
             .map_err(|e| categorize(e, profile, "_manifest"))?;
