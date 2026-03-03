@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, missing_docs, clippy::items_after_statements)]
 //! Tests for the runner module.
 
 use mcp_secret_launcher::runner::*;
@@ -6,12 +7,17 @@ use secrecy::{ExposeSecret, SecretString};
 
 #[test]
 fn test_build_env_includes_inherited_env() -> anyhow::Result<()> {
-    let inherited = vec![("MSL_TEST_INHERITED".to_string(), "inherited_value".to_string())];
+    let inherited = vec![(
+        "MSL_TEST_INHERITED".to_string(),
+        "inherited_value".to_string(),
+    )];
     let secrets = vec![];
     let env = build_env(secrets, inherited);
 
     assert!(env.contains_key("MSL_TEST_INHERITED"));
-    let secret = env.get("MSL_TEST_INHERITED").ok_or_else(|| anyhow::anyhow!("env var missing"))?;
+    let secret = env
+        .get("MSL_TEST_INHERITED")
+        .ok_or_else(|| anyhow::anyhow!("env var missing"))?;
     assert_eq!(secret.expose_secret(), "inherited_value");
     Ok(())
 }
@@ -25,7 +31,9 @@ fn test_build_env_secrets_override_inherited() -> anyhow::Result<()> {
     )];
     let env = build_env(secrets, inherited);
 
-    let secret = env.get("MSL_TEST_OVERRIDE").ok_or_else(|| anyhow::anyhow!("env var missing"))?;
+    let secret = env
+        .get("MSL_TEST_OVERRIDE")
+        .ok_or_else(|| anyhow::anyhow!("env var missing"))?;
     assert_eq!(secret.expose_secret(), "secret_value");
     Ok(())
 }
@@ -40,10 +48,14 @@ fn test_build_env_includes_both_inherited_and_secrets() -> anyhow::Result<()> {
     let env = build_env(secrets, inherited);
 
     assert!(env.contains_key("MSL_TEST_KEEP"));
-    let secret_keep = env.get("MSL_TEST_KEEP").ok_or_else(|| anyhow::anyhow!("env var missing"))?;
+    let secret_keep = env
+        .get("MSL_TEST_KEEP")
+        .ok_or_else(|| anyhow::anyhow!("env var missing"))?;
     assert_eq!(secret_keep.expose_secret(), "keep_me");
 
-    let secret_new = env.get("MSL_TEST_NEW_SECRET").ok_or_else(|| anyhow::anyhow!("env var missing"))?;
+    let secret_new = env
+        .get("MSL_TEST_NEW_SECRET")
+        .ok_or_else(|| anyhow::anyhow!("env var missing"))?;
     assert_eq!(secret_new.expose_secret(), "new_secret");
     Ok(())
 }
@@ -53,6 +65,44 @@ fn test_build_env_empty_secrets() {
     let inherited = vec![("PATH".to_string(), "/usr/bin".to_string())];
     let env = build_env(vec![], inherited);
     assert!(!env.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_exec_command_empty_cmd() {
+    let env = std::collections::HashMap::new();
+    let res = exec_command(&[], env);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().to_string(), "Empty command vector");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_exec_command_not_found() {
+    let env = std::collections::HashMap::new();
+    let res = exec_command(&["/path/to/nonexistent/binary/12345".to_string()], env);
+    assert!(res.is_err());
+    let err_string = res.unwrap_err().to_string();
+    assert!(err_string.contains("Failed to execute"));
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn test_spawn_command_empty_cmd() {
+    let env = std::collections::HashMap::new();
+    let res = spawn_command(&[], env);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().to_string(), "Empty command vector");
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn test_spawn_command_not_found() {
+    let env = std::collections::HashMap::new();
+    let res = spawn_command(&["C:\\path\\to\\nonexistent\\binary.exe".to_string()], env);
+    assert!(res.is_err());
+    let err_string = res.unwrap_err().to_string();
+    assert!(err_string.contains("Failed to execute"));
 }
 
 // Feature: mcp-secret-launcher, Property 10: Exit code propagation

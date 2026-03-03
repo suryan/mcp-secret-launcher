@@ -1,5 +1,5 @@
+#![allow(clippy::unwrap_used, missing_docs, clippy::items_after_statements)]
 //! Tests for the `keyring_ops` module.
-
 
 use mcp_secret_launcher::errors::LauncherError;
 use mcp_secret_launcher::keyring_ops::*;
@@ -19,12 +19,48 @@ fn test_mock_keyring_set_and_get_secret() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn test_os_keyring_linux_dbus_missing() {
+    temp_env::with_var_unset("DBUS_SESSION_BUS_ADDRESS", || {
+        let keyring = OsKeyring;
+
+        let res = keyring.get_secret("prof", "key");
+        assert!(res.is_err());
+        let err_msg = res.unwrap_err().to_string();
+        assert!(err_msg.contains("dbus-daemon"));
+
+        let secret = SecretString::from("value".to_string());
+        assert!(keyring.set_secret("prof", "key", &secret).is_err());
+        assert!(keyring.delete_secret("prof", "key").is_err());
+        assert!(keyring.get_manifest("prof").is_err());
+        assert!(keyring.set_manifest("prof", &["key".to_string()]).is_err());
+    });
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_os_keyring_error_paths() {
+    // By setting a dummy dbus address, we pass check_linux_env but fail naturally
+    // when accessing the keyring, which hits all the map_err categorization paths
+    temp_env::with_var("DBUS_SESSION_BUS_ADDRESS", Some("dummy:path"), || {
+        let keyring = OsKeyring;
+        let _ = keyring.get_secret("prof", "key");
+        let _ = keyring.set_secret("prof", "key", &SecretString::from("val".to_string()));
+        let _ = keyring.delete_secret("prof", "key");
+        let _ = keyring.get_manifest("prof");
+        let _ = keyring.set_manifest("prof", &[]);
+    });
+}
+
 #[test]
 fn test_mock_keyring_get_secret_not_found() -> anyhow::Result<()> {
     let keyring = MockKeyring::new();
     let result = keyring.get_secret("myprofile", "MISSING_KEY");
     assert!(result.is_err());
-    let Err(err) = result else { return Err(anyhow::anyhow!("Expected error")) };
+    let Err(err) = result else {
+        return Err(anyhow::anyhow!("Expected error"));
+    };
     let msg = err.to_string();
     assert!(msg.contains("myprofile"));
     assert!(msg.contains("MISSING_KEY"));
@@ -49,7 +85,9 @@ fn test_mock_keyring_delete_secret_nonexistent_returns_error() -> anyhow::Result
     // Deleting a key that doesn't exist should return SecretNotFound
     let result = keyring.delete_secret("prof", "NOPE");
     assert!(result.is_err());
-    let Err(err) = result else { return Err(anyhow::anyhow!("Expected error")) };
+    let Err(err) = result else {
+        return Err(anyhow::anyhow!("Expected error"));
+    };
     assert!(
         err.downcast_ref::<LauncherError>()
             .is_some_and(|e| { matches!(e, LauncherError::SecretNotFound { .. }) })
@@ -80,9 +118,7 @@ fn test_mock_keyring_get_manifest_empty_when_missing() -> anyhow::Result<()> {
 fn test_mock_keyring_set_manifest_overwrites() -> anyhow::Result<()> {
     let keyring = MockKeyring::new();
     keyring.set_manifest("prof", &["A".to_string()])?;
-    keyring
-        .set_manifest("prof", &["B".to_string(), "C".to_string()])
-        ?;
+    keyring.set_manifest("prof", &["B".to_string(), "C".to_string()])?;
 
     let retrieved = keyring.get_manifest("prof")?;
     assert_eq!(retrieved, vec!["B".to_string(), "C".to_string()]);
@@ -96,9 +132,7 @@ fn test_load_secrets_returns_all_secrets() -> anyhow::Result<()> {
     let s2 = SecretString::from("val2".to_string());
     keyring.set_secret("prof", "KEY_A", &s1)?;
     keyring.set_secret("prof", "KEY_B", &s2)?;
-    keyring
-        .set_manifest("prof", &["KEY_A".to_string(), "KEY_B".to_string()])
-        ?;
+    keyring.set_manifest("prof", &["KEY_A".to_string(), "KEY_B".to_string()])?;
 
     let secrets = load_secrets(&keyring, "prof")?;
     assert_eq!(secrets.len(), 2);
@@ -121,13 +155,13 @@ fn test_load_secrets_empty_when_no_manifest() -> anyhow::Result<()> {
 fn test_load_secrets_fails_on_missing_secret() -> anyhow::Result<()> {
     let keyring = MockKeyring::new();
     // Manifest says KEY_X exists, but it's not in the store
-    keyring
-        .set_manifest("prof", &["KEY_X".to_string()])
-        ?;
+    keyring.set_manifest("prof", &["KEY_X".to_string()])?;
 
     let result = load_secrets(&keyring, "prof");
     assert!(result.is_err());
-    let Err(err) = result else { return Err(anyhow::anyhow!("Expected error")) };
+    let Err(err) = result else {
+        return Err(anyhow::anyhow!("Expected error"));
+    };
     let msg = err.to_string();
     assert!(msg.contains("KEY_X"));
     assert!(msg.contains("prof"));
@@ -144,8 +178,7 @@ fn test_delete_secret_removes_from_keyring_and_manifest() -> anyhow::Result<()> 
     assert!(keyring.get_secret("prof", "MY_KEY").is_ok());
     assert!(
         keyring
-            .get_manifest("prof")
-            ?
+            .get_manifest("prof")?
             .contains(&"MY_KEY".to_string())
     );
 
@@ -157,8 +190,7 @@ fn test_delete_secret_removes_from_keyring_and_manifest() -> anyhow::Result<()> 
     // Verify removed from manifest
     assert!(
         !keyring
-            .get_manifest("prof")
-            ?
+            .get_manifest("prof")?
             .contains(&"MY_KEY".to_string())
     );
     Ok(())
@@ -168,9 +200,7 @@ fn test_delete_secret_removes_from_keyring_and_manifest() -> anyhow::Result<()> 
 fn test_delete_secret_already_absent_still_removes_from_manifest() -> anyhow::Result<()> {
     let keyring = MockKeyring::new();
     // Manually set a manifest entry without a corresponding secret
-    keyring
-        .set_manifest("prof", &["GHOST_KEY".to_string()])
-        ?;
+    keyring.set_manifest("prof", &["GHOST_KEY".to_string()])?;
 
     // delete_secret should succeed (warning logged to stderr) and clean up manifest
     delete_secret(&keyring, "prof", "GHOST_KEY")?;
@@ -178,8 +208,7 @@ fn test_delete_secret_already_absent_still_removes_from_manifest() -> anyhow::Re
     // Manifest should no longer contain the key
     assert!(
         !keyring
-            .get_manifest("prof")
-            ?
+            .get_manifest("prof")?
             .contains(&"GHOST_KEY".to_string())
     );
     Ok(())
