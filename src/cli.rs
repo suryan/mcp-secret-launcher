@@ -21,6 +21,27 @@ pub enum Command {
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
+    /// Authenticate via AWS SSO and launch the target command
+    AwsAuth {
+        /// The AWS SSO start URL
+        #[arg(long = "sso-url")]
+        sso_url: String,
+        /// The AWS region for the SSO portal
+        #[arg(long)]
+        region: String,
+        /// The AWS account ID
+        #[arg(long = "account-id")]
+        account_id: String,
+        /// The IAM role name to assume
+        #[arg(long = "role-name")]
+        role_name: String,
+        /// Optional profile to load standard secrets alongside AWS credentials
+        #[arg(long)]
+        profile: Option<String>,
+        /// Target command and arguments (after --)
+        #[arg(last = true, required = true)]
+        cmd: Vec<String>,
+    },
     /// Store a secret in the keyring (interactive prompt)
     Set {
         /// The profile to store the secret under.

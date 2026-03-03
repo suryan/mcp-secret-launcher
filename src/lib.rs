@@ -1,16 +1,41 @@
-//! MCP Secret Launcher Library
+//! # MCP Secret Launcher
 //!
-//! Provides core functionality for managing secrets and launching MCP servers.
+//! A library for securely managing secrets in the OS keyring and launching
+//! processes with those secrets injected as environment variables.
 
-/// Command-line interface definitions and parsers.
+/// Core application logic and command handlers.
+pub mod app;
+/// AWS SSO authentication and credential management.
+pub mod aws_sso;
+/// CLI argument definition and parsing.
 pub mod cli;
-/// Error types and categories for the launcher.
+/// Error types and categorization for the launcher.
 pub mod errors;
-/// Operations for reading and writing to the OS keyring.
+/// Abstractions and implementations for OS keyring backends.
 pub mod keyring_ops;
-/// Utilities for securely masking secret values in logs and output.
+/// Utilities for masking sensitive strings in output.
 pub mod masking;
-/// Interfaces and implementations for securely prompting the user for secrets.
+/// Trait and implementations for secure user prompts.
 pub mod prompter;
-/// Process execution logic with secure environment variable injection.
+/// Logic for spawning and executing child processes.
 pub mod runner;
+
+/// Re-export of the main application entry point.
+pub use app::run_app;
+
+use clap::Parser;
+use cli::Cli;
+use keyring_ops::KeyringBackend;
+use prompter::SecretPrompter;
+
+/// Runs the CLI with the given arguments and backends.
+/// This allows testing the CLI entry point without spawning a new process.
+pub fn run_cli(
+    args: Vec<String>,
+    backend: &dyn KeyringBackend,
+    prompter: &dyn SecretPrompter,
+    env_vars: Vec<(String, String)>,
+) -> anyhow::Result<()> {
+    let cli = Cli::try_parse_from(args)?;
+    run_app(cli.command, backend, prompter, env_vars)
+}
