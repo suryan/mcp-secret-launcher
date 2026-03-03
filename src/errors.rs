@@ -9,11 +9,11 @@ pub enum LauncherError {
     #[error(
         "Secret '{key}' not found for profile '{profile}'. Run: mcp-secret-launcher set --profile {profile} --key {key}"
     )]
-    SecretNotFound { 
+    SecretNotFound {
         /// The profile the secret belongs to.
-        profile: String, 
+        profile: String,
         /// The key of the missing secret.
-        key: String 
+        key: String,
     },
 
     /// Indicates the underlying keyring is locked and user authentication is required.
@@ -22,9 +22,9 @@ pub enum LauncherError {
 
     /// Indicates the keyring daemon service is not running or accessible.
     #[error("Keyring daemon not available. Ensure {daemon} is running.")]
-    KeyringUnavailable { 
+    KeyringUnavailable {
         /// The expected daemon name based on the OS.
-        daemon: String 
+        daemon: String,
     },
 
     /// Indicates the program lacks permissions to read from the keyring.
@@ -44,12 +44,23 @@ pub enum LauncherError {
     #[error(
         "Secret '{key}' listed in manifest for profile '{profile}' but missing from keyring. Run: mcp-secret-launcher set --profile {profile} --key {key}"
     )]
-    StaleManifestEntry { 
+    StaleManifestEntry {
         /// The profile for the stale secret.
-        profile: String, 
+        profile: String,
         /// The key for the stale secret.
-        key: String 
+        key: String,
     },
+}
+
+impl From<std::io::Error> for LauncherError {
+    fn from(value: std::io::Error) -> Self {
+        match value.kind() {
+            std::io::ErrorKind::PermissionDenied => LauncherError::InsufficientPermissions,
+            _ => LauncherError::KeyringUnavailable {
+                daemon: detect_daemon(),
+            },
+        }
+    }
 }
 
 /// Maps a `keyring` crate error to the appropriate `LauncherError` variant,

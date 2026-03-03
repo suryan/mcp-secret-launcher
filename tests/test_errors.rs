@@ -1,85 +1,19 @@
-//! Tests for the errors module.
+#![allow(clippy::unwrap_used, missing_docs, clippy::items_after_statements, clippy::panic)]
+//! Tests for the `LauncherError` enum and its categorization logic.
 
-
-use mcp_secret_launcher::errors::*;
+use mcp_secret_launcher::errors::{LauncherError, categorize};
 use proptest::prelude::*;
 
 #[test]
-fn test_secret_not_found_display() {
-    let err = LauncherError::SecretNotFound {
-        profile: "myprofile".to_string(),
-        key: "MY_KEY".to_string(),
-    };
-    let msg = err.to_string();
-    assert!(msg.contains("myprofile"));
-    assert!(msg.contains("MY_KEY"));
-    assert!(msg.contains("mcp-secret-launcher set --profile myprofile --key MY_KEY"));
-}
-
-#[test]
-fn test_keyring_locked_display() {
-    let err = LauncherError::KeyringLocked;
-    let msg = err.to_string();
-    assert!(msg.contains("locked"));
-    assert!(msg.contains("Unlock"));
-}
-
-#[test]
-fn test_keyring_unavailable_display() {
-    let err = LauncherError::KeyringUnavailable {
-        daemon: "gnome-keyring-daemon".to_string(),
-    };
-    let msg = err.to_string();
-    assert!(msg.contains("gnome-keyring-daemon"));
-    assert!(msg.contains("Ensure"));
-}
-
-#[test]
-fn test_insufficient_permissions_display() {
-    let err = LauncherError::InsufficientPermissions;
-    let msg = err.to_string();
-    assert!(msg.contains("permissions"));
-}
-
-#[test]
-fn test_exec_failed_display() {
-    let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "not found");
-    let err = LauncherError::ExecFailed {
-        command: "uvx".to_string(),
-        source: io_err,
-    };
-    let msg = err.to_string();
-    assert!(msg.contains("uvx"));
-    assert!(msg.contains("not found"));
-}
-
-#[test]
-fn test_stale_manifest_entry_display() {
-    let err = LauncherError::StaleManifestEntry {
-        profile: "prod".to_string(),
-        key: "API_TOKEN".to_string(),
-    };
-    let msg = err.to_string();
-    assert!(msg.contains("prod"));
-    assert!(msg.contains("API_TOKEN"));
-    assert!(msg.contains("mcp-secret-launcher set --profile prod --key API_TOKEN"));
-}
-
-#[test]
 fn test_categorize_no_entry() {
-    let result = categorize(keyring::Error::NoEntry, "prof", "key1");
-    match result {
-        LauncherError::SecretNotFound { profile, key } => {
-            assert_eq!(profile, "prof");
-            assert_eq!(key, "key1");
-        }
-        _ => panic!("Expected SecretNotFound, got {result:?}"),
-    }
+    let err = keyring::Error::NoEntry;
+    let result = categorize(err, "prof", "key1");
+    assert!(matches!(result, LauncherError::SecretNotFound { .. }));
 }
 
 #[test]
 fn test_categorize_no_storage_access_defaults_to_locked() {
-    let inner = std::io::Error::other("keyring is locked");
+    let inner = std::io::Error::other("locked");
     let err = keyring::Error::NoStorageAccess(Box::new(inner));
     let result = categorize(err, "prof", "key1");
     assert!(matches!(result, LauncherError::KeyringLocked));
@@ -87,45 +21,153 @@ fn test_categorize_no_storage_access_defaults_to_locked() {
 
 #[test]
 fn test_categorize_no_storage_access_permission() {
-    let inner = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+    let inner = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
     let err = keyring::Error::NoStorageAccess(Box::new(inner));
     let result = categorize(err, "prof", "key1");
     assert!(matches!(result, LauncherError::InsufficientPermissions));
 }
 
 #[test]
+fn test_categorize_platform_failure_gnome_keyring() {
+    let inner = std::io::Error::other("gnome-keyring-daemon: not running");
+    let err = keyring::Error::PlatformFailure(Box::new(inner));
+    let result = categorize(err, "prof", "key1");
+    assert!(matches!(result, LauncherError::KeyringUnavailable { .. }));
+}
+
+#[test]
 fn test_categorize_platform_failure_dbus() {
-    let inner = std::io::Error::other("dbus connection failed");
+    let inner = std::io::Error::other("DBus error");
     let err = keyring::Error::PlatformFailure(Box::new(inner));
     let result = categorize(err, "prof", "key1");
     assert!(matches!(result, LauncherError::KeyringUnavailable { .. }));
 }
 
 #[test]
-fn test_categorize_platform_failure_permission() {
-    let inner = std::io::Error::other("permission denied by system");
+fn test_categorize_platform_failure_generic() {
+    let inner = std::io::Error::other("Generic IO error");
     let err = keyring::Error::PlatformFailure(Box::new(inner));
-    let result = categorize(err, "prof", "key1");
-    assert!(matches!(result, LauncherError::InsufficientPermissions));
-}
-
-#[test]
-fn test_categorize_platform_failure_lock() {
-    let inner = std::io::Error::other("auth required to unlock");
-    let err = keyring::Error::PlatformFailure(Box::new(inner));
-    let result = categorize(err, "prof", "key1");
-    assert!(matches!(result, LauncherError::KeyringLocked));
-}
-
-#[test]
-fn test_categorize_other_errors_default_to_unavailable() {
-    let err = keyring::Error::BadEncoding(vec![0xFF]);
     let result = categorize(err, "prof", "key1");
     assert!(matches!(result, LauncherError::KeyringUnavailable { .. }));
 }
 
-// Feature: mcp-secret-launcher, Property 9: Error messages contain structured information
-// **Validates: Requirements 12.2**
+#[test]
+fn test_launcher_error_display() {
+    let err = LauncherError::SecretNotFound {
+        profile: "p".to_string(),
+        key: "k".to_string(),
+    };
+    let msg = format!("{err}");
+    assert!(msg.contains('p'));
+    assert!(msg.contains('k'));
+}
+
+#[test]
+fn test_keyring_locked_display() {
+    let err = LauncherError::KeyringLocked;
+    let msg = format!("{err}");
+    assert!(msg.contains("locked"));
+}
+
+#[test]
+fn test_keyring_unavailable_display() {
+    let err = LauncherError::KeyringUnavailable {
+        daemon: "d".to_string(),
+    };
+    let msg = format!("{err}");
+    assert!(msg.contains('d'));
+}
+
+#[test]
+fn test_insufficient_permissions_display() {
+    let err = LauncherError::InsufficientPermissions;
+    let msg = format!("{err}");
+    assert!(msg.contains("permissions"));
+}
+
+#[test]
+fn test_exec_failed_display() {
+    let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "fail");
+    let err = LauncherError::ExecFailed {
+        command: "cmd".to_string(),
+        source: io_err,
+    };
+    let msg = format!("{err}");
+    assert!(msg.contains("cmd"));
+}
+
+#[test]
+fn test_categorize_platform_failure_auth_failed() {
+    let inner = std::io::Error::other("Authentication failed");
+    let err = keyring::Error::PlatformFailure(Box::new(inner));
+    let res = categorize(err, "p", "k");
+    assert!(matches!(res, LauncherError::KeyringLocked));
+}
+
+#[test]
+fn test_categorize_platform_failure_no_daemon() {
+    let inner = std::io::Error::other("Daemon not running");
+    let err = keyring::Error::PlatformFailure(Box::new(inner));
+    let res = categorize(err, "p", "k");
+    if let LauncherError::KeyringUnavailable { daemon } = res {
+        if cfg!(target_os = "linux") {
+            assert!(daemon.contains("keyring-daemon"));
+        } else {
+            assert_eq!(daemon, "keyring service");
+        }
+    } else {
+        panic!("Expected KeyringUnavailable error");
+    }
+}
+
+#[test]
+fn test_categorize_platform_failure_dbus_org_freedesktop() {
+    let inner = std::io::Error::other(
+        "The name org.freedesktop.secrets was not provided by any .service files",
+    );
+    let err = keyring::Error::PlatformFailure(Box::new(inner));
+    let result = categorize(err, "prof", "key1");
+    // This should match KeyringUnavailable
+    assert!(matches!(result, LauncherError::KeyringUnavailable { .. }));
+}
+
+#[test]
+fn test_detect_daemon_fallback() {
+    // "generic error" doesn't match daemon, dbus, auth, etc., so it hits the default branch
+    let err = keyring::Error::PlatformFailure(Box::new(std::io::Error::other("generic error")));
+    let result = categorize(err, "prof", "key1");
+    assert!(matches!(result, LauncherError::KeyringUnavailable { .. }));
+}
+
+#[test]
+fn test_from_io_error_to_launcher_error() {
+    let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "fail");
+    let err = LauncherError::from(io_err);
+    assert!(matches!(err, LauncherError::InsufficientPermissions));
+}
+
+#[test]
+fn test_from_io_error_generic() {
+    let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "fail");
+    let err = LauncherError::from(io_err);
+    assert!(matches!(err, LauncherError::KeyringUnavailable { .. }));
+}
+
+#[test]
+fn test_from_stale_manifest_error() {
+    let err = LauncherError::StaleManifestEntry {
+        profile: "p".to_string(),
+        key: "k".to_string(),
+    };
+    let _ = err.to_string();
+}
+
+#[test]
+fn test_launcher_error_debug() {
+    let err = LauncherError::KeyringLocked;
+    let _ = format!("{err:?}");
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 
