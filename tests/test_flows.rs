@@ -1,5 +1,5 @@
+#![allow(clippy::unwrap_used, missing_docs, clippy::items_after_statements)]
 //! Tests for end-to-end flows.
-
 
 use mcp_secret_launcher::keyring_ops::{self, KeyringBackend, MockKeyring};
 use mcp_secret_launcher::masking::mask_value;

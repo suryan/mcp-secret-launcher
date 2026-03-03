@@ -1,5 +1,5 @@
+#![allow(clippy::unwrap_used, missing_docs, clippy::items_after_statements)]
 //! Tests for the prompter module.
-
 
 //! Tests for the prompter module.
 

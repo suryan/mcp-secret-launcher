@@ -1,276 +1,112 @@
-# mcp-secret-launcher
+# 🛡️ mcp-secret-launcher
 
-A lightweight Rust CLI that retrieves secrets from the OS keyring and launches MCP servers with those secrets injected as environment variables. No more plaintext API tokens in `mcp.json`.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey.svg)]()
 
-## The Problem
+**Stop leaking API tokens!** Secure your MCP servers by fetching secrets from your OS keyring instead of storing them in plaintext `mcp.json`.
 
-MCP server configs (`~/.kiro/settings/mcp.json`) require API tokens in plaintext `env` blocks — visible to anyone with file access, easy to accidentally commit, and a violation of standard credential management practices.
+---
 
-## How It Works
+## 🚀 Why Use This?
 
-1. Reads secrets from the native OS keyring (GNOME Keyring on Linux, Keychain on macOS, Credential Manager on Windows)
-2. Injects them as environment variables in memory
-3. Execs the target MCP server process — on Unix, the launcher replaces itself via `execvp` so it doesn't stay resident
+MCP server configurations typically require sensitive tokens in plaintext `env` blocks. This makes them visible to anyone with file access and easy to accidentally commit. `mcp-secret-launcher` solves this by:
 
-### Architecture
-![Architecture Diagram](docs/architecture.png)
+- 🔒 **Keyring Integration:** Uses GNOME Keyring (Linux), Keychain (macOS), or Credential Manager (Windows).
+- 🔑 **AWS SSO Support:** Automatically handles AWS SSO login and injects temporary credentials.
+- 💨 **Zero overhead:** Replaces itself with the target process via `execvp` on Unix.
+- 🛠️ **Seamless Integration:** Works with any MCP client (Kiro, VS Code, etc.) with a simple one-line change.
 
-### Execution Flow
-![Flow Diagram](docs/flow.png)
+---
 
-## Prerequisites
+## ⚡ Quick Start
 
-### Linux (Ubuntu/Debian)
-
-The Secret Service backend requires DBus development libraries:
-
-```bash
-sudo apt install -y libdbus-1-dev pkg-config
-```
-
-### macOS / Windows
-
-No additional system dependencies required.
-
-## Installation
-
+### 1. Install
 ```bash
 cargo build --release
 cp target/release/mcp-secret-launcher ~/.local/bin/
 ```
 
-## Usage
-
-### Store a secret
-
-Secrets are entered via a secure, non-echoing prompt. They are never accepted as CLI arguments (no `--value` flag) to prevent leaking into shell history or logs.
-
+### 2. Store a Secret
 ```bash
-mcp-secret-launcher set --profile mcp-atlassian --key JIRA_API_TOKEN
-# Enter secret value: [hidden input]
+mcp-secret-launcher set --profile my-server --key API_KEY
+# Enter secret value: [secure input]
 ```
 
-### Verify a secret
+### 3. Update `mcp.json`
+Update your server configuration to use the launcher:
 
-```bash
-mcp-secret-launcher get --profile mcp-atlassian --key JIRA_API_TOKEN
-# JIRA_API_TOKEN = ATATT3x...****
+```diff
+ {
+   "mcpServers": {
+     "my-server": {
+-      "command": "uvx",
+-      "args": ["my-server-command"],
+-      "env": { "API_KEY": "YOUR_SECRET_IN_PLAINTEXT" }
++      "command": "mcp-secret-launcher",
++      "args": ["run", "--profile", "my-server", "--", "uvx", "my-server-command"],
++      "env": { "NON_SECRET_VAR": "public-value" }
+     }
+   }
+ }
 ```
 
-### List keys for a profile
+---
 
+## 🌟 Key Features
+
+### 🔐 Platform Native Security
+No new databases or config files. We use what's already on your machine:
+- **Linux:** Secret Service API (via DBus)
+- **macOS:** Apple Keychain
+- **Windows:** Windows Credential Manager
+
+### ☁️ AWS SSO Magic
+Launching an AWS-based MCP server? Tired of manual `aws sso login`?
 ```bash
-mcp-secret-launcher list --profile mcp-atlassian
-# JIRA_API_TOKEN
-# CONFLUENCE_TOKEN
+mcp-secret-launcher aws-auth \
+  --sso-url https://my-sso.awsapps.com/start \
+  --region us-east-1 \
+  --account-id 123456789012 \
+  --role-name DeveloperRole \
+  -- uvx mcp-server-aws
 ```
+The launcher will handle the browser-based auth flow and inject `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc., directly into the server's memory.
 
-### Launch an MCP server
+---
 
-```bash
-mcp-secret-launcher run --profile mcp-atlassian -- uvx mcp-atlassian
-```
+## 🛡️ Defense in Depth
 
-### Delete a secret
+For maximum security, combine **mcp-secret-launcher** with [**mcp-guard**](https://github.com/suryan/mcp-guard):
 
-```bash
-mcp-secret-launcher delete --profile mcp-atlassian --key JIRA_API_TOKEN
-```
+- **mcp-secret-launcher (Layer 3/4):** Protects your *credentials* by keeping them in the OS keyring.
+- **mcp-guard (Layer 7):** Protects your *resources* by intercepting tool calls and enforcing Human-In-The-Loop (HITL) approval.
 
-## MCP JSON Integration
-
-### Example: Securing `mcp-atlassian`
-
-A typical `mcp-atlassian` config looks like this — with API tokens in plaintext:
-
+**Complete Security Stack:**
 ```json
-{
-  "mcpServers": {
-    "mcp-atlassian": {
-      "command": "uvx",
-      "args": ["mcp-atlassian"],
-      "env": {
-        "JIRA_URL": "https://mycompany.atlassian.net",
-        "JIRA_USERNAME": "user@example.com",
-        "JIRA_API_TOKEN": "ATATT3xFfGF0...",
-        "CONFLUENCE_URL": "https://mycompany.atlassian.net/wiki",
-        "CONFLUENCE_USERNAME": "user@example.com",
-        "CONFLUENCE_API_TOKEN": "ATATT3xFfGF0..."
-      }
-    }
-  }
+"my-server": {
+  "command": "mcp-guard",
+  "args": [
+    "--policy", "guard-policy.toml",
+    "--",
+    "mcp-secret-launcher", "run", "--profile", "my-server",
+    "--",
+    "uvx", "my-server-command"
+  ]
 }
 ```
+In this setup, **mcp-guard** acts as the primary proxy, and **mcp-secret-launcher** initializes the environment before the server starts.
 
-#### Step 1 — Store the secrets in the keyring
+---
 
-```bash
-mcp-secret-launcher set --profile mcp-atlassian --key JIRA_API_TOKEN
-# Enter secret value: [hidden input]
+## 📖 Learn More
 
-mcp-secret-launcher set --profile mcp-atlassian --key CONFLUENCE_API_TOKEN
-# Enter secret value: [hidden input]
-```
+| Guide | Description |
+| :--- | :--- |
+| [📂 Usage Guide](docs/usage.md) | Detailed CLI commands and `mcp.json` examples. |
+| [🏗️ Architecture](docs/architecture.md) | How the secret injection and process replacement works. |
+| [👩‍💻 Development](docs/development.md) | Setup instructions for contributors. |
 
-#### Step 2 — Verify they were stored
+## ⚖️ License
 
-```bash
-mcp-secret-launcher list --profile mcp-atlassian
-# JIRA_API_TOKEN
-# CONFLUENCE_API_TOKEN
-```
-
-#### Step 3 — Update `mcp.json`
-
-Replace `command` and `args`, and remove the secret values from `env`:
-
-```json
-{
-  "mcpServers": {
-    "mcp-atlassian": {
-      "command": "mcp-secret-launcher",
-      "args": ["run", "--profile", "mcp-atlassian", "--", "uvx", "mcp-atlassian"],
-      "env": {
-        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-        "JIRA_URL": "https://mycompany.atlassian.net",
-        "JIRA_USERNAME": "user@example.com",
-        "CONFLUENCE_URL": "https://mycompany.atlassian.net/wiki",
-        "CONFLUENCE_USERNAME": "user@example.com"
-      }
-    }
-  }
-}
-```
-
-> **Linux only:** `DBUS_SESSION_BUS_ADDRESS` is required so the launcher can reach the keyring daemon. IDEs like Kiro and VS Code often don't pass this to spawned processes. Run `echo $DBUS_SESSION_BUS_ADDRESS` in your terminal to get the correct value. On macOS and Windows this is not needed.
-
-Non-secret env vars (URLs, usernames) stay in `mcp.json` as usual. The key names you store with `--key` must match the environment variable names the target server expects. At launch, the launcher reads all keys for the profile from the OS keyring, merges them with the static `env` block, and execs the target command. Keyring values take precedence on name collision.
-
-## Platform Support
-
-| Platform | Keyring Backend | Exec Behavior |
-|----------|----------------|---------------|
-| Linux | libsecret / Secret Service D-Bus | `execvp` (launcher replaced) |
-| macOS | Security.framework / Keychain | `execvp` (launcher replaced) |
-| Windows | Credential Manager | Spawn + wait + propagate exit code |
-
-Linux requires a running keyring daemon (e.g., `gnome-keyring-daemon`, KeePassXC). Headless environments like Docker need explicit daemon configuration.
-
-## Troubleshooting
-
-### `Keyring daemon not available` / `DBUS_SESSION_BUS_ADDRESS is missing`
-
-On Linux, the keyring backend uses D-Bus to communicate with the secret service daemon. When an IDE (Kiro, VS Code, Cursor, etc.) spawns MCP server processes, it often does **not** inherit the desktop session's `DBUS_SESSION_BUS_ADDRESS` variable.
-
-**Symptoms:**
-```
-Error: Keyring daemon not available. Ensure dbus-daemon (DBUS_SESSION_BUS_ADDRESS is missing) is running.
-```
-
-**Fix:** Add `DBUS_SESSION_BUS_ADDRESS` to the `env` block in your `mcp.json`:
-
-```bash
-# Find your value
-echo $DBUS_SESSION_BUS_ADDRESS
-# Typical output: unix:path=/run/user/1000/bus
-```
-
-Then add it to your config:
-```json
-"env": {
-  "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-  ...
-}
-```
-
-This is not needed on macOS or Windows.
-
-## Security
-
-- Secrets never touch disk, logs, or stdout (except masked via `get`)
-- All secret values wrapped in `secrecy::SecretString` with zeroize-on-drop
-- No temporary files created at any point
-- `set` uses non-echoing terminal input — no `--value` flag exists
-- On Windows, the env map is explicitly dropped/zeroized before waiting on the child process
-- Known limitation: on Linux, `/proc/[pid]/environ` exposes env vars to same-uid or root for the lifetime of the child process. This is an accepted tradeoff vs persistent plaintext files.
-
-## Dependencies
-
-| Crate | Purpose |
-|-------|---------|
-| `keyring` v3 | Cross-platform native keyring access |
-| `clap` v4 | CLI argument parsing (derive) |
-| `secrecy` v0.10 | Zeroize-on-drop secret wrappers |
-| `rpassword` v5 | Secure non-echoing terminal prompts |
-| `anyhow` | Error handling with context |
-| `thiserror` | Structured error types |
-| `serde_json` | Manifest serialization |
-
-## Development
-
-### Diagrams
-
-If you modify the architecture or flow diagrams in `docs/`, you must regenerate the PNG files. This project uses [D2](https://d2lang.com/) and the ELK layout engine.
-
-```bash
-# Install D2 (if not already installed)
-curl -fsSL https://d2lang.com/install.sh | sh -s --
-
-# Generate PNGs
-d2 --layout=elk docs/architecture.d2 docs/architecture.png
-d2 --layout=elk docs/flow.d2 docs/flow.png
-```
-
-### Code Quality Checks
-
-The project enforces strict code quality using `rustfmt` and `clippy`. You should run these checks before committing.
-
-**To auto-fix formatting and some lints:**
-```bash
-# Auto-format code
-cargo fmt
-
-# Auto-fix clippy lints (where possible)
-cargo clippy --fix --allow-dirty --allow-staged
-```
-
-**To check for formatting and lints (e.g., in CI):**
-```bash
-# Check formatting without modifying files
-cargo fmt -- --check
-
-# Check lints without fixing
-cargo clippy --all-targets --all-features
-```
-
-### Running Tests
-
-The project includes a comprehensive test suite. The test suite uses `proptest` for property-based testing and a `MockKeyring` backend so no real keyring interaction is needed during tests.
-
-```bash
-# Run all tests
-cargo test
-
-# Run a specific test suite
-cargo test --test test_keyring_ops
-
-# Run a specific test case
-cargo test test_mock_keyring_set_and_get_secret
-
-# Run tests with output printed to the console (useful for debugging)
-cargo test -- --nocapture
-```
-
-### Building
-
-```bash
-# Build debug binary for development
-cargo build
-
-# Build release binary for production
-cargo build --release
-```
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for more information.

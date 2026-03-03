@@ -1,5 +1,5 @@
+#![allow(clippy::unwrap_used, missing_docs, clippy::items_after_statements)]
 //! Tests for the masking module.
-
 
 use mcp_secret_launcher::masking::*;
 use proptest::prelude::*;

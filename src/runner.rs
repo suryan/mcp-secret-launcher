@@ -52,7 +52,7 @@ pub fn exec_command(cmd: &[String], env: HashMap<String, SecretString>) -> anyho
 /// the `env` map BEFORE calling `.wait()` on the child. This ensures secrets
 /// are cleared from the launcher's memory while the child is still running, since the
 /// launcher remains resident on Windows (unlike Unix execvp which replaces the process).
-#[cfg(windows)]
+// Used on Windows by default, and on Unix for testing to avoid execvp process replacement.
 #[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)]
 pub fn spawn_command(cmd: &[String], env: HashMap<String, SecretString>) -> anyhow::Result<i32> {
     let program = cmd
