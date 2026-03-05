@@ -670,3 +670,135 @@ fn test_get_aws_credentials_lock_fallback() {
         let _ = res;
     });
 }
+
+#[test]
+fn test_get_aws_credentials_token_other_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(200)
+        .with_body(r#"{"clientId": "c", "clientSecret": "s", "clientSecretExpiresAt": 2000000000}"#)
+        .create();
+    let _m2 = server.mock("POST", "/device_authorization").with_status(200)
+        .with_body(r#"{"deviceCode": "dc", "userCode": "uc", "verificationUri": "http://v", "expiresIn": 60, "interval": 0}"#).create();
+
+    let _m3 = server
+        .mock("POST", "/token")
+        .with_status(400)
+        .with_body(r#"{"error": "unsupported_grant_type"}"#)
+        .create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("unsupported_grant_type")
+        );
+    });
+}
+
+#[test]
+fn test_get_aws_credentials_token_transport_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(200)
+        .with_body(r#"{"clientId": "c", "clientSecret": "s", "clientSecretExpiresAt": 2000000000}"#)
+        .create();
+    let _m2 = server.mock("POST", "/device_authorization").with_status(200)
+        .with_body(r#"{"deviceCode": "dc", "userCode": "uc", "verificationUri": "http://v", "expiresIn": 60, "interval": 0}"#).create();
+
+    let _m3 = server.mock("POST", "/token").with_status(500).create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+    });
+}
+
+#[test]
+fn test_get_aws_credentials_client_reg_400_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(400)
+        .with_body(r#"{"error": "invalid_request"}"#)
+        .create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("OIDC Client Reg Error")
+        );
+    });
+}
+
+#[test]
+fn test_get_aws_credentials_device_auth_400_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(200)
+        .with_body(r#"{"clientId": "c", "clientSecret": "s", "clientSecretExpiresAt": 2000000000}"#)
+        .create();
+    let _m2 = server
+        .mock("POST", "/device_authorization")
+        .with_status(400)
+        .with_body(r#"{"error": "invalid_client"}"#)
+        .create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("OIDC Device Auth Error")
+        );
+    });
+}

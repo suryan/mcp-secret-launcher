@@ -120,16 +120,14 @@ fn test_empty_manifest_list_returns_empty() -> anyhow::Result<()> {
 
 /// Masking boundary: exactly 7 characters returns "****"
 #[test]
-fn test_masking_boundary_exactly_7_chars() -> anyhow::Result<()> {
+fn test_masking_boundary_exactly_7_chars() {
     assert_eq!(mask_value("1234567"), "****");
-    Ok(())
 }
 
 /// Masking boundary: exactly 8 characters returns first 7 + "...****"
 #[test]
-fn test_masking_boundary_exactly_8_chars() -> anyhow::Result<()> {
+fn test_masking_boundary_exactly_8_chars() {
     assert_eq!(mask_value("12345678"), "1234567...****");
-    Ok(())
 }
 
 /// Deleting a key that was never set succeeds gracefully (warning printed)
