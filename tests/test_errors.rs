@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, missing_docs, clippy::items_after_statements, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    missing_docs,
+    clippy::items_after_statements,
+    clippy::panic
+)]
 //! Tests for the `LauncherError` enum and its categorization logic.
 
 use mcp_secret_launcher::errors::{LauncherError, categorize};
@@ -48,6 +53,22 @@ fn test_categorize_platform_failure_generic() {
     let inner = std::io::Error::other("Generic IO error");
     let err = keyring::Error::PlatformFailure(Box::new(inner));
     let result = categorize(err, "prof", "key1");
+    assert!(matches!(result, LauncherError::KeyringUnavailable { .. }));
+}
+
+#[test]
+fn test_categorize_platform_failure_permission() {
+    let inner = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+    let err = keyring::Error::PlatformFailure(Box::new(inner));
+    let result = categorize(err, "prof", "key1");
+    assert!(matches!(result, LauncherError::InsufficientPermissions));
+}
+
+#[test]
+fn test_categorize_catch_all() {
+    // testing some other keyring error variant
+    let err = keyring::Error::BadEncoding(vec![]);
+    let result = categorize(err, "prof", "key");
     assert!(matches!(result, LauncherError::KeyringUnavailable { .. }));
 }
 
