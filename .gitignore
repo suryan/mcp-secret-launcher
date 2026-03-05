@@ -30,3 +30,4 @@ dist/
 icons
 .kiro
 .llvm-cov-env
+.cargo-llvm-cov
