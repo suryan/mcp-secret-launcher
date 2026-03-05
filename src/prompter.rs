@@ -11,6 +11,7 @@ pub trait SecretPrompter {
 /// Production implementation using `rpassword` for non-echoing terminal input.
 pub struct TerminalPrompter;
 
+#[cfg(not(coverage))]
 impl SecretPrompter for TerminalPrompter {
     fn prompt_secret(&self, prompt: &str) -> anyhow::Result<SecretString> {
         let value = rpassword::prompt_password_stderr(prompt)?;
@@ -18,11 +19,22 @@ impl SecretPrompter for TerminalPrompter {
     }
 }
 
+#[cfg(coverage)]
+impl SecretPrompter for TerminalPrompter {
+    fn prompt_secret(&self, _prompt: &str) -> anyhow::Result<SecretString> {
+        Err(anyhow::anyhow!(
+            "Interactive prompt excluded from coverage run"
+        ))
+    }
+}
+
 /// Mock implementation for testing that returns a predefined `SecretString`.
+#[cfg(any(test, feature = "test-utils", debug_assertions))]
 pub struct MockPrompter {
     value: SecretString,
 }
 
+#[cfg(any(test, feature = "test-utils", debug_assertions))]
 impl MockPrompter {
     /// Creates a new mock prompter with a predefined value.
     pub fn new(value: SecretString) -> Self {
@@ -30,6 +42,7 @@ impl MockPrompter {
     }
 }
 
+#[cfg(any(test, feature = "test-utils", debug_assertions))]
 impl SecretPrompter for MockPrompter {
     fn prompt_secret(&self, _prompt: &str) -> anyhow::Result<SecretString> {
         Ok(self.value.clone())

@@ -273,9 +273,6 @@ pub fn get_aws_credentials(
                 eprintln!("The token may have been revoked server-side.");
                 eprintln!("Deleting cached token. Please rerun the command to authenticate.");
                 let _ = keyring_ops::delete_secret(backend, PROFILE_NAME, &token_key);
-                if std::env::var("__MCP_TEST_NO_EXEC").is_err() {
-                    std::process::exit(1);
-                }
             }
             return Err(e);
         }
@@ -345,8 +342,9 @@ fn get_or_register_client(
             ));
         }
         Err(e) => {
-            eprintln!("Failed to register OIDC client in region {region}");
-            return Err(e.into());
+            return Err(anyhow::anyhow!(
+                "Failed to register OIDC client in region {region}: {e}"
+            ));
         }
     };
 
@@ -387,9 +385,9 @@ fn perform_device_authorization(
             ));
         }
         Err(e) => {
-            eprintln!("Failed to start device authorization for {sso_url}");
-            eprintln!("Please verify the SSO Start URL is correct.");
-            return Err(e.into());
+            return Err(anyhow::anyhow!(
+                "Failed to start device authorization for {sso_url}. Please verify the SSO Start URL is correct. {e}"
+            ));
         }
     };
 
@@ -409,27 +407,21 @@ fn perform_device_authorization(
         let is_mocked = MOCK_URL.with(|m| m.borrow().is_some());
         if is_mocked {
             eprintln!("(Browser open bypassed in mock mode)");
-        } else if open::that(verification_uri).is_err() {
-            eprintln!("Could not automatically open browser.");
         }
     }
     #[cfg(not(any(test, feature = "test-utils", debug_assertions)))]
     {
-        if open::that(verification_uri).is_err() {
-            eprintln!("Could not automatically open browser.");
-        }
+        let _ = open::that(verification_uri);
     }
 
-    eprintln!("\nIf it did not open, manually navigate to:");
     eprintln!(
-        "  {}",
+        "\nIf it did not open, manually navigate to: {}",
         auth_info
             .verification_uri
             .as_deref()
             .unwrap_or(verification_uri)
     );
-    eprintln!("\nVerify the code matches:");
-    eprintln!("  {}\n", auth_info.user_code);
+    eprintln!("Verify the code matches: {}\n", auth_info.user_code);
 
     // Setup Ctrl-C handler for graceful exit
     let running = Arc::new(AtomicBool::new(true));
@@ -490,16 +482,10 @@ fn perform_device_authorization(
                             interval += 5;
                         }
                         "expired_token" => {
-                            if std::env::var("__MCP_TEST_NO_EXEC").is_err() {
-                                std::process::exit(1);
-                            }
                             return Err(anyhow::anyhow!("The device authorization code expired"));
                         }
                         "access_denied" => {
                             eprintln!("\nAuthorization was denied by the user.");
-                            if std::env::var("__MCP_TEST_NO_EXEC").is_err() {
-                                std::process::exit(1);
-                            }
                             return Err(anyhow::anyhow!("Authorization was denied by the user"));
                         }
                         other => {
@@ -514,16 +500,10 @@ fn perform_device_authorization(
 
     if !running.load(Ordering::SeqCst) {
         eprintln!("\nAuthorization cancelled by user.");
-        if std::env::var("__MCP_TEST_NO_EXEC").is_err() {
-            std::process::exit(130); // Standard SIGINT exit code
-        }
         return Err(anyhow::anyhow!("Authorization cancelled by user"));
     }
 
     eprintln!("\nDevice authorization code expired.");
-    if std::env::var("__MCP_TEST_NO_EXEC").is_err() {
-        std::process::exit(1);
-    }
     Err(anyhow::anyhow!("Device authorization code expired"))
 }
 
