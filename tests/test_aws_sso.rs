@@ -3,6 +3,8 @@ use mcp_secret_launcher::keyring_ops::KeyringBackend;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 
+static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // We will test `get_aws_credentials` end-to-end with mockito since the helper functions
 struct MockKeyringBackend {
     storage: std::cell::RefCell<HashMap<String, SecretString>>,
@@ -50,6 +52,7 @@ impl KeyringBackend for MockKeyringBackend {
 // NOTE: We need to test the public entry point `get_aws_credentials`.
 #[test]
 fn test_get_aws_credentials_end_to_end_new_token() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
 
     // 1. Mock Client Registration
@@ -63,7 +66,7 @@ fn test_get_aws_credentials_end_to_end_new_token() {
     let _m2 = server.mock("POST", "/device_authorization")
         .with_status(200)
         .with_header("content-type", "application/json")
-        .with_body(r#"{"deviceCode": "dc123", "userCode": "CODE-123", "verificationUri": "http://127.0.0.1/verify", "expiresIn": 600, "interval": 1}"#)
+        .with_body(r#"{"deviceCode": "dc123", "userCode": "CODE-123", "verificationUri": "http://127.0.0.1/verify", "expiresIn": 600, "interval": 0}"#)
         .create();
 
     // 3. Mock Token Polling (Success immediately)
@@ -118,6 +121,7 @@ fn test_get_aws_credentials_end_to_end_new_token() {
 
 #[test]
 fn test_get_aws_credentials_cached_token_valid() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -163,6 +167,7 @@ fn test_get_aws_credentials_cached_token_valid() {
 
 #[test]
 fn test_get_aws_credentials_on_401_deletes_token() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -209,6 +214,7 @@ fn test_get_aws_credentials_on_401_deletes_token() {
 
 #[test]
 fn test_get_aws_credentials_device_code_expired() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -226,7 +232,7 @@ fn test_get_aws_credentials_device_code_expired() {
     let _m2 = server.mock("POST", "/device_authorization")
         .with_status(200)
         .with_header("content-type", "application/json")
-        .with_body(r#"{"deviceCode": "dc123", "userCode": "UC-123", "verificationUri": "http://v", "expiresIn": 60, "interval": 1}"#)
+        .with_body(r#"{"deviceCode": "dc123", "userCode": "UC-123", "verificationUri": "http://v", "expiresIn": 60, "interval": 0}"#)
         .create();
 
     // 3. Mock Token Polling returns "expired_token"
@@ -254,6 +260,7 @@ fn test_get_aws_credentials_device_code_expired() {
 
 #[test]
 fn test_get_aws_credentials_client_cached() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -302,6 +309,7 @@ fn test_get_aws_credentials_client_cached() {
 
 #[test]
 fn test_get_aws_credentials_polling_logic() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -366,6 +374,7 @@ fn test_get_aws_credentials_polling_logic() {
 
 #[test]
 fn test_get_aws_credentials_client_reg_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -394,6 +403,7 @@ fn test_get_aws_credentials_client_reg_error() {
 
 #[test]
 fn test_get_aws_credentials_loop_timeout() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -443,6 +453,7 @@ fn test_get_aws_credentials_loop_timeout() {
 
 #[test]
 fn test_get_aws_credentials_access_denied() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -480,6 +491,7 @@ fn test_get_aws_credentials_access_denied() {
 
 #[test]
 fn test_get_aws_credentials_client_reg_transport_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -502,6 +514,7 @@ fn test_get_aws_credentials_client_reg_transport_error() {
 
 #[test]
 fn test_get_aws_credentials_device_auth_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -530,6 +543,7 @@ fn test_get_aws_credentials_device_auth_error() {
 
 #[test]
 fn test_get_aws_credentials_slow_down() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -582,6 +596,7 @@ fn test_get_aws_credentials_slow_down() {
 
 #[test]
 fn test_get_role_credentials_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = MockKeyringBackend::new();
 
@@ -628,6 +643,7 @@ fn test_get_role_credentials_error() {
 
 #[test]
 fn test_get_aws_credentials_lock_fallback() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let mut server = mockito::Server::new();
     let backend = mcp_secret_launcher::keyring_ops::MockKeyring::new();
 
@@ -652,5 +668,137 @@ fn test_get_aws_credentials_lock_fallback() {
         // but it will hit the warning line (205) either way.
         // We just care about hitting the lines.
         let _ = res;
+    });
+}
+
+#[test]
+fn test_get_aws_credentials_token_other_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(200)
+        .with_body(r#"{"clientId": "c", "clientSecret": "s", "clientSecretExpiresAt": 2000000000}"#)
+        .create();
+    let _m2 = server.mock("POST", "/device_authorization").with_status(200)
+        .with_body(r#"{"deviceCode": "dc", "userCode": "uc", "verificationUri": "http://v", "expiresIn": 60, "interval": 0}"#).create();
+
+    let _m3 = server
+        .mock("POST", "/token")
+        .with_status(400)
+        .with_body(r#"{"error": "unsupported_grant_type"}"#)
+        .create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("unsupported_grant_type")
+        );
+    });
+}
+
+#[test]
+fn test_get_aws_credentials_token_transport_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(200)
+        .with_body(r#"{"clientId": "c", "clientSecret": "s", "clientSecretExpiresAt": 2000000000}"#)
+        .create();
+    let _m2 = server.mock("POST", "/device_authorization").with_status(200)
+        .with_body(r#"{"deviceCode": "dc", "userCode": "uc", "verificationUri": "http://v", "expiresIn": 60, "interval": 0}"#).create();
+
+    let _m3 = server.mock("POST", "/token").with_status(500).create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+    });
+}
+
+#[test]
+fn test_get_aws_credentials_client_reg_400_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(400)
+        .with_body(r#"{"error": "invalid_request"}"#)
+        .create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("OIDC Client Reg Error")
+        );
+    });
+}
+
+#[test]
+fn test_get_aws_credentials_device_auth_400_error() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let mut server = mockito::Server::new();
+    let backend = MockKeyringBackend::new();
+
+    let _m1 = server
+        .mock("POST", "/client/register")
+        .with_status(200)
+        .with_body(r#"{"clientId": "c", "clientSecret": "s", "clientSecretExpiresAt": 2000000000}"#)
+        .create();
+    let _m2 = server
+        .mock("POST", "/device_authorization")
+        .with_status(400)
+        .with_body(r#"{"error": "invalid_client"}"#)
+        .create();
+
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(server.url()));
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        let res = mcp_secret_launcher::aws_sso::get_aws_credentials(
+            &backend,
+            "https://sso.example.com",
+            "us-east-1",
+            "A",
+            "R",
+        );
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("OIDC Device Auth Error")
+        );
     });
 }

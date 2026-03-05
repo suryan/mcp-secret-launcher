@@ -114,10 +114,6 @@ pub fn categorize(err: keyring::Error, profile: &str, key: &str) -> LauncherErro
 fn detect_daemon() -> String {
     if cfg!(target_os = "linux") {
         "gnome-keyring-daemon".to_string()
-    } else if cfg!(target_os = "macos") {
-        "security service (Keychain)".to_string()
-    } else if cfg!(target_os = "windows") {
-        "Credential Manager service".to_string()
     } else {
         "keyring service".to_string()
     }

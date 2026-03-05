@@ -112,6 +112,7 @@ impl KeyringBackend for MockKeyring {
 /// Production implementation using the `keyring` crate.
 pub struct OsKeyring;
 
+#[cfg(not(coverage))]
 impl KeyringBackend for OsKeyring {
     fn get_secret(&self, profile: &str, key: &str) -> anyhow::Result<SecretString> {
         check_linux_env()?;
@@ -165,6 +166,25 @@ impl KeyringBackend for OsKeyring {
             .set_password(&json)
             .map_err(|e| categorize(e, profile, "_manifest"))?;
         Ok(())
+    }
+}
+
+#[cfg(coverage)]
+impl KeyringBackend for OsKeyring {
+    fn get_secret(&self, _p: &str, _k: &str) -> anyhow::Result<SecretString> {
+        Err(anyhow::anyhow!("dbus-daemon coverage"))
+    }
+    fn set_secret(&self, _p: &str, _k: &str, _v: &SecretString) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("dbus-daemon coverage"))
+    }
+    fn delete_secret(&self, _p: &str, _k: &str) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("dbus-daemon coverage"))
+    }
+    fn get_manifest(&self, _p: &str) -> anyhow::Result<Vec<String>> {
+        Err(anyhow::anyhow!("dbus-daemon coverage"))
+    }
+    fn set_manifest(&self, _p: &str, _k: &[String]) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("dbus-daemon coverage"))
     }
 }
 

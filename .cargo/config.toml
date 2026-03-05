@@ -1,0 +1,8 @@
+[alias]
+# Run tests with coverage and enforce the 95% minimum line coverage threshold.
+# Usage: cargo coverage
+coverage = "llvm-cov --all-features --fail-under-lines 95"
+
+# Convenience alias to generate an HTML coverage report locally.
+# Usage: cargo coverage-html
+coverage-html = "llvm-cov --all-features --open"

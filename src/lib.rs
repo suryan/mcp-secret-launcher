@@ -5,7 +5,7 @@
 
 /// Core application logic and command handlers.
 pub mod app;
-/// AWS SSO authentication and credential management.
+/// AWS SSO credential retrieval and caching.
 pub mod aws_sso;
 /// CLI argument definition and parsing.
 pub mod cli;

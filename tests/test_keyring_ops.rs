@@ -10,7 +10,8 @@ use std::collections::HashSet;
 
 #[test]
 fn test_mock_keyring_set_and_get_secret() -> anyhow::Result<()> {
-    let keyring = MockKeyring::new();
+    // Tests Default impl
+    let keyring = MockKeyring::default();
     let secret = SecretString::from("my-token-value".to_string());
     keyring.set_secret("myprofile", "API_KEY", &secret)?;
 
@@ -480,4 +481,40 @@ proptest! {
             "Manifest should match kept keys after healing. Got: {:?}, Expected: {:?}", manifest_set, kept_keys
         );
     }
+}
+
+struct FailingMockKeyring;
+
+impl KeyringBackend for FailingMockKeyring {
+    fn get_secret(&self, _profile: &str, _key: &str) -> anyhow::Result<SecretString> {
+        Err(anyhow::anyhow!("Some other error in get_secret"))
+    }
+    fn set_secret(&self, _profile: &str, _key: &str, _value: &SecretString) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn delete_secret(&self, _profile: &str, _key: &str) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("Some other error in delete_secret"))
+    }
+    fn get_manifest(&self, _profile: &str) -> anyhow::Result<Vec<String>> {
+        Ok(vec!["KEY1".to_string()])
+    }
+    fn set_manifest(&self, _profile: &str, _keys: &[String]) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn test_delete_secret_passes_through_other_errors() {
+    let keyring = FailingMockKeyring;
+    let res = delete_secret(&keyring, "prof", "key");
+    assert!(res.is_err());
+    assert!(res.unwrap_err().to_string().contains("delete_secret"));
+}
+
+#[test]
+fn test_list_keys_with_healing_passes_through_other_errors() {
+    let keyring = FailingMockKeyring;
+    let res = list_keys_with_healing(&keyring, "prof");
+    assert!(res.is_err());
+    assert!(res.unwrap_err().to_string().contains("get_secret"));
 }
