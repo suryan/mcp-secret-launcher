@@ -27,7 +27,7 @@ d2 --layout=elk docs/flow.d2 docs/flow.png
 
 ## Code Quality Checks
 
-The project enforces strict code quality using `rustfmt` and `clippy`. You should run these checks before committing.
+The project enforces strict code quality using `rustfmt` and `clippy`. Both checks are **automatically enforced by `cargo test`** via integration tests (`test_clippy.rs` and `test_formatting.rs`), so any clippy warning or formatting issue will cause the test suite to fail.
 
 **To auto-fix formatting and some lints:**
 ```bash
@@ -38,7 +38,7 @@ cargo fmt
 cargo clippy --fix --allow-dirty --allow-staged
 ```
 
-**To check for formatting and lints (e.g., in CI):**
+**To check individually (e.g., before committing):**
 ```bash
 # Check formatting without modifying files
 cargo fmt -- --check
