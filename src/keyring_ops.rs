@@ -18,6 +18,7 @@ fn check_linux_env() -> anyhow::Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(clippy::unnecessary_wraps)]
 fn check_linux_env() -> anyhow::Result<()> {
     Ok(())
 }
