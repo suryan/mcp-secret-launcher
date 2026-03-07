@@ -27,7 +27,7 @@ d2 --layout=elk docs/flow.d2 docs/flow.png
 
 ## Code Quality Checks
 
-The project enforces strict code quality using `rustfmt` and `clippy`. Both checks are **automatically enforced by `cargo test`** via integration tests (`test_clippy.rs` and `test_formatting.rs`), so any clippy warning or formatting issue will cause the test suite to fail.
+The project enforces strict code quality using `rustfmt` and `clippy`. See [clippy_policy.md](clippy_policy.md) for detailed linting requirements.
 
 **To auto-fix formatting and some lints:**
 ```bash
@@ -45,6 +45,34 @@ cargo fmt -- --check
 
 # Check lints without fixing
 cargo clippy --all-targets --all-features
+```
+
+### Git Hooks
+
+To automatically enforce formatting, clippy lints, and test success before creating a commit, you can set up a local Git `pre-commit` hook. 
+
+Create a file at `.git/hooks/pre-commit` with the following content and make it executable (`chmod +x .git/hooks/pre-commit`):
+
+```sh
+#!/bin/sh
+# pre-commit hook to enforce formatting, clippy, and pass tests
+
+echo "Running pre-commit checks..."
+
+# 1. Check Formatting
+echo "=> Running cargo fmt"
+cargo fmt -- --check || { echo "❌ Formatting check failed."; exit 1; }
+
+# 2. Check Clippy
+echo "=> Running cargo clippy"
+cargo clippy --all-targets --all-features || { echo "❌ Clippy failed."; exit 1; }
+
+# 3. Run Tests
+echo "=> Running cargo test"
+cargo test || { echo "❌ Tests failed."; exit 1; }
+
+echo "✅ All pre-commit checks passed!"
+exit 0
 ```
 
 ## Running Tests

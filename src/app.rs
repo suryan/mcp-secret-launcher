@@ -6,6 +6,9 @@ use secrecy::ExposeSecret;
 
 /// Core execution logic for the MCP Secret Launcher.
 /// Extracted from `main.rs` to allow unit testing of the CLI logic.
+///
+/// # Errors
+/// Returns an error if secret retrieval, prompting, or child process execution fails.
 pub fn run_app(
     command: Command,
     backend: &dyn KeyringBackend,

@@ -26,14 +26,29 @@ fn check_linux_env() -> anyhow::Result<()> {
 /// Trait abstracting keyring access for testability.
 pub trait KeyringBackend {
     /// Retrieves a secret from the keyring.
+    ///
+    /// # Errors
+    /// Returns an error if the secret cannot be found or accessed.
     fn get_secret(&self, profile: &str, key: &str) -> anyhow::Result<SecretString>;
     /// Stores an inner secret in the keyring.
+    ///
+    /// # Errors
+    /// Returns an error if the keyring backend rejects the storage request.
     fn set_secret(&self, profile: &str, key: &str, value: &SecretString) -> anyhow::Result<()>;
     /// Deletes a secret from the keyring.
+    ///
+    /// # Errors
+    /// Returns an error if the secret cannot be found or deleted.
     fn delete_secret(&self, profile: &str, key: &str) -> anyhow::Result<()>;
     /// Gets the list of valid keys for a profile.
+    ///
+    /// # Errors
+    /// Returns an error if the manifest cannot be read.
     fn get_manifest(&self, profile: &str) -> anyhow::Result<Vec<String>>;
     /// Sets the list of valid keys for a profile.
+    ///
+    /// # Errors
+    /// Returns an error if the manifest cannot be written.
     fn set_manifest(&self, profile: &str, keys: &[String]) -> anyhow::Result<()>;
 }
 
@@ -54,6 +69,7 @@ impl Default for MockKeyring {
 
 impl MockKeyring {
     /// Creates a new, empty mock keyring.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             store: RefCell::new(HashMap::new()),
@@ -195,6 +211,9 @@ impl KeyringBackend for OsKeyring {
 /// retrieves each secret from the keyring. If a manifest key is missing
 /// from the keyring, the error (`SecretNotFound`) is propagated.
 /// If no manifest exists, returns an empty vec (no secrets configured).
+///
+/// # Errors
+/// Returns an error if reading the manifest or retrieving any secret fails.
 pub fn load_secrets(
     backend: &dyn KeyringBackend,
     profile: &str,
@@ -217,6 +236,9 @@ pub fn load_secrets(
 /// Calls `set_secret` on the backend, then reads the manifest for the profile.
 /// If the key is not already present in the manifest, appends it and writes
 /// the updated manifest back.
+///
+/// # Errors
+/// Returns an error if setting the secret or updating the manifest fails.
 pub fn store_secret(
     backend: &dyn KeyringBackend,
     profile: &str,
@@ -242,6 +264,9 @@ pub fn store_secret(
 ///
 /// After the keyring deletion (or warning), reads the manifest, removes
 /// the key name if present, and writes the updated manifest back.
+///
+/// # Errors
+/// Returns an error if a backend exception occurs that isn't `SecretNotFound`.
 pub fn delete_secret(backend: &dyn KeyringBackend, profile: &str, key: &str) -> anyhow::Result<()> {
     // Step 1: Try to delete the secret from the keyring
     match backend.delete_secret(profile, key) {
@@ -279,6 +304,9 @@ pub fn delete_secret(backend: &dyn KeyringBackend, profile: &str, key: &str) -> 
 /// 5. If `get_secret` fails with any other error, propagates the error.
 /// 6. If any stale entries were found, writes the updated manifest (only valid keys).
 /// 7. Returns the valid key names.
+///
+/// # Errors
+/// Returns an error if reading from or writing to the keyring fails with a system error.
 pub fn list_keys_with_healing(
     backend: &dyn KeyringBackend,
     profile: &str,

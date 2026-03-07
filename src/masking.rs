@@ -2,6 +2,7 @@
 ///
 /// - If the input is longer than 7 characters: returns the first 7 characters followed by `...****`
 /// - If the input is 7 characters or fewer: returns `****`
+#[must_use]
 pub fn mask_value(value: &str) -> String {
     let char_count = value.chars().count();
     if char_count > 7 {
