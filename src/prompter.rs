@@ -5,6 +5,9 @@ use secrecy::SecretString;
 /// Trait abstracting interactive secret input for testability.
 pub trait SecretPrompter {
     /// Prompts the user for a secret securely.
+    ///
+    /// # Errors
+    /// Returns an error if the interactive prompt fails or is not available.
     fn prompt_secret(&self, prompt: &str) -> anyhow::Result<SecretString>;
 }
 
@@ -37,6 +40,7 @@ pub struct MockPrompter {
 #[cfg(any(test, feature = "test-utils", debug_assertions))]
 impl MockPrompter {
     /// Creates a new mock prompter with a predefined value.
+    #[must_use]
     pub fn new(value: SecretString) -> Self {
         Self { value }
     }

@@ -188,6 +188,10 @@ fn get_portal_url(region: &str) -> String {
 /// 3. Polling for the access token.
 /// 4. Retrieving temporary role credentials.
 /// 5. Caching credentials and tokens for future use.
+///
+/// # Errors
+/// Returns an error if the OIDC device authorization flow fails, if the token request
+/// errors out, or if fetching role credentials from the AWS portal is denied.
 pub fn get_aws_credentials(
     backend: &dyn KeyringBackend,
     sso_url: &str,

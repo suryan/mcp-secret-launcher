@@ -66,6 +66,7 @@ impl From<std::io::Error> for LauncherError {
 /// Maps a `keyring` crate error to the appropriate `LauncherError` variant,
 /// using the provided profile and key as context for the error message.
 #[allow(clippy::needless_pass_by_value)]
+#[must_use]
 pub fn categorize(err: keyring::Error, profile: &str, key: &str) -> LauncherError {
     match err {
         keyring::Error::NoEntry => LauncherError::SecretNotFound {

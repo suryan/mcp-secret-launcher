@@ -30,6 +30,9 @@ use prompter::SecretPrompter;
 
 /// Runs the CLI with the given arguments and backends.
 /// This allows testing the CLI entry point without spawning a new process.
+///
+/// # Errors
+/// Returns an error if argument parsing fails, or if the underlying command execution fails.
 pub fn run_cli(
     args: Vec<String>,
     backend: &dyn KeyringBackend,

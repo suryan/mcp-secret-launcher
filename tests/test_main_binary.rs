@@ -15,6 +15,21 @@ fn test_main_cli_help() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_main_cli_version() -> anyhow::Result<()> {
+    let output = Command::new(env!("CARGO_BIN_EXE_mcp-secret-launcher"))
+        .arg("--version")
+        .output()?;
+
+    anyhow::ensure!(output.status.success(), "expected --version to succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    anyhow::ensure!(
+        stdout.contains("mcp-secret-launcher") && stdout.contains(env!("CARGO_PKG_VERSION")),
+        "unexpected --version output: {stdout}"
+    );
+    Ok(())
+}
+
+#[test]
 fn test_main_cli_run_echo() -> anyhow::Result<()> {
     let output = Command::new(env!("CARGO_BIN_EXE_mcp-secret-launcher"))
         .env("DBUS_SESSION_BUS_ADDRESS", "dummy:path")

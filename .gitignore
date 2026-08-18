@@ -1,3 +1,6 @@
+# Local env overrides (secrets / machine-specific paths)
+local.env
+
 # Log file
 *.log
 

@@ -25,6 +25,9 @@ pub fn build_env(
 }
 
 /// Unix: calls execvp, replacing the current process. Does not return on success.
+///
+/// # Errors
+/// Returns an error if the `execvp` syscall fails.
 #[cfg(unix)]
 #[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)]
 pub fn exec_command(cmd: &[String], env: HashMap<String, SecretString>) -> anyhow::Result<()> {
@@ -53,6 +56,9 @@ pub fn exec_command(cmd: &[String], env: HashMap<String, SecretString>) -> anyho
 /// are cleared from the launcher's memory while the child is still running, since the
 /// launcher remains resident on Windows (unlike Unix execvp which replaces the process).
 // Used on Windows by default, and on Unix for testing to avoid execvp process replacement.
+///
+/// # Errors
+/// Returns an error if the child process fails to spawn or wait for exit.
 #[allow(clippy::needless_pass_by_value, clippy::implicit_hasher)]
 pub fn spawn_command(cmd: &[String], env: HashMap<String, SecretString>) -> anyhow::Result<i32> {
     let program = cmd
