@@ -1,6 +1,95 @@
 # Usage Guide
 
-This guide covers how to manage secrets and configure your MCP servers to use `mcp-secret-launcher`.
+This guide covers how to install `mcp-secret-launcher`, manage secrets, and configure MCP servers.
+
+## Installation
+
+`mcp-secret-launcher` is a single Rust binary. Prefer **install from source** on each machine
+(no GitHub release artifacts to maintain). Supported: **macOS**, **Linux**, **WSL2**.
+
+### One-liner (recommended)
+
+```bash
+# Binary + ~/.local/bin on PATH
+curl -fsSL https://raw.githubusercontent.com/suryan/mcp-secret-launcher/main/scripts/install.sh \
+  | bash -s -- --with-path --yes
+```
+
+What it does:
+
+1. Ensures a Rust toolchain (`rustup` if `cargo` is missing)
+2. Clones/updates the repo under `~/.local/src/mcp-secret-launcher` (override with `--dir`)
+3. `cargo build --release`
+4. Installs to `~/.local/bin/mcp-secret-launcher` (override with `--prefix`)
+5. With `--with-path`: runs `scripts/setup-user.sh`
+   - writes `~/.config/mcp-secret-launcher/path.env`
+   - sources it from `~/.bashrc`, `~/.zshrc`, `~/.profile`, `~/.zprofile` (idempotent)
+
+```bash
+# Common options
+bash scripts/install.sh --help
+bash scripts/install.sh --prefix ~/.local --with-path --yes
+bash scripts/install.sh --ref main
+bash scripts/install.sh --local --with-path            # current clone only
+MCP_SECRET_LAUNCHER_PREFIX=/usr/local sudo -E bash scripts/install.sh --yes   # system-wide (careful)
+```
+
+| Variable / flag | Default | Meaning |
+|-----------------|---------|---------|
+| `--prefix` / `MCP_SECRET_LAUNCHER_PREFIX` | `~/.local` | Binary at `$PREFIX/bin/mcp-secret-launcher` |
+| `--ref` / `MCP_SECRET_LAUNCHER_REF` | `main` | Git branch, tag, or commit |
+| `--repo` / `MCP_SECRET_LAUNCHER_REPO` | this GitHub repo | Clone URL |
+| `--dir` / `MCP_SECRET_LAUNCHER_DIR` | `~/.local/src/mcp-secret-launcher` | Checkout path |
+| `--with-path` | off | `path.env` + shell rc (see `setup-user.sh`) |
+| `--no-shell-rc` | off | Write env file only; do not edit rc files |
+| `--yes` | off | Non-interactive rustup install |
+
+**Requirements:** `curl` + `git`, C linker (`build-essential` on Debian/Ubuntu,
+Xcode CLT on macOS: `xcode-select --install`), network for crates.io.
+
+### `cargo install` (Rust toolchain already present)
+
+```bash
+cargo install --git https://github.com/suryan/mcp-secret-launcher --locked
+./scripts/setup-user.sh    # PATH + shell integration (from a clone)
+```
+
+### From a local clone
+
+```bash
+git clone https://github.com/suryan/mcp-secret-launcher.git
+cd mcp-secret-launcher
+./scripts/install.sh --local --with-path
+# or stepwise:
+make setup-user                 # release binary + path.env + shell rc
+```
+
+### Make shortcuts
+
+```bash
+make help          # list targets
+make release       # optimized build
+make install       # install binary to ~/.local/bin
+make setup-user    # binary + path.env + shell rc
+make precommit     # fmt, clippy, tests (coverage if cargo-llvm-cov is installed)
+```
+
+### Verify installation
+
+```bash
+mcp-secret-launcher --version
+mcp-secret-launcher --help
+```
+
+If `mcp-secret-launcher` is not found, add `~/.local/bin` to `PATH` (or
+`source ~/.config/mcp-secret-launcher/path.env`).
+
+MCP / IDE hosts often skip shell profiles. Either set `PATH` in the host env or
+use the absolute path as `command` in `mcp.json`:
+
+```json
+"command": "/home/YOU/.local/bin/mcp-secret-launcher"
+```
 
 ## Managing Secrets
 

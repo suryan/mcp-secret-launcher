@@ -22,10 +22,34 @@ MCP server configurations typically require sensitive tokens in plaintext `env` 
 ## ⚡ Quick Start
 
 ### 1. Install
+
+No release binaries required — build from source on the machine that will run it.
+Works on **macOS** and **Linux** (including WSL2).
+
 ```bash
-cargo build --release
-cp target/release/mcp-secret-launcher ~/.local/bin/
+# Binary + ~/.local/bin on PATH (bash + zsh)
+curl -fsSL https://raw.githubusercontent.com/suryan/mcp-secret-launcher/main/scripts/install.sh \
+  | bash -s -- --with-path --yes
 ```
+
+What that does:
+
+1. Bootstraps [rustup](https://rustup.rs) if `cargo` is missing
+2. Builds a release binary → `~/.local/bin/mcp-secret-launcher`
+3. Writes `~/.config/mcp-secret-launcher/path.env` and sources it from `~/.bashrc` / `~/.zshrc` / `~/.profile` / `~/.zprofile`
+
+```bash
+# From a local clone
+./scripts/install.sh --local --with-path
+# or stepwise:
+make setup-user
+```
+
+Open a **new shell** after install, then: `mcp-secret-launcher --help`
+
+**Requirements:** `git`, a C linker (`build-essential` on Debian/Ubuntu, Xcode CLT on macOS),
+network for crates.io on first build. Rust developers can also
+`cargo install --git https://github.com/suryan/mcp-secret-launcher --locked`.
 
 ### 2. Store a Secret
 ```bash
@@ -103,9 +127,9 @@ In this setup, **mcp-guard** acts as the primary proxy, and **mcp-secret-launche
 
 | Guide | Description |
 | :--- | :--- |
-| [📂 Usage Guide](docs/usage.md) | Detailed CLI commands and `mcp.json` examples. |
+| [📂 Usage Guide](docs/usage.md) | Install, CLI commands, and `mcp.json` examples. |
 | [🏗️ Architecture](docs/architecture.md) | How the secret injection and process replacement works. |
-| [👩‍💻 Development](docs/development.md) | Setup instructions for contributors. |
+| [👩‍💻 Development](docs/development.md) | Setup, quality gate, and contributor workflow. |
 
 ## ⚖️ License
 

@@ -2,6 +2,9 @@
 name = "mcp-secret-launcher"
 version = "0.1.0"
 edition = "2024"
+description = "Launch MCP servers with secrets from the OS keyring instead of plaintext mcp.json"
+license = "MIT"
+repository = "https://github.com/suryan/mcp-secret-launcher"
 
 [dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }

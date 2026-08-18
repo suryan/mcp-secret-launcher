@@ -2,7 +2,11 @@ use clap::{Parser, Subcommand};
 
 /// Command-line arguments for the MCP Secret Launcher.
 #[derive(Parser)]
-#[command(name = "mcp-secret-launcher", about = "Secure MCP server launcher")]
+#[command(
+    name = "mcp-secret-launcher",
+    version,
+    about = "Secure MCP server launcher"
+)]
 pub struct Cli {
     /// The subcommand to execute.
     #[command(subcommand)]

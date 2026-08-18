@@ -1,5 +1,41 @@
 # Development Guide
 
+## Prerequisites
+
+- **Rust** (stable) — install via [rustup](https://rustup.rs/)
+- **git**, plus a C linker (`build-essential` on Debian/Ubuntu, Xcode CLT on macOS)
+
+Copy [`local.env.example`](../local.env.example) to `local.env` for optional local
+overrides (`MCP_SECRET_LAUNCHER_*`). Do not commit `local.env`.
+
+## Getting Started
+
+```bash
+# Clone
+git clone https://github.com/suryan/mcp-secret-launcher.git
+cd mcp-secret-launcher
+
+# Debug build
+cargo build
+
+# Install a release binary to ~/.local/bin and put it on PATH
+./scripts/install.sh --local --with-path
+# or: make setup-user
+```
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/install.sh` | macOS/Linux install-from-source (`--local`, `--with-path`, `--yes`) |
+| `scripts/setup-user.sh` | Write `path.env` and source it from bash/zsh rc files |
+| `scripts/check.sh` | Quality gate: format → clippy → tests (coverage if `cargo-llvm-cov` is installed) |
+
+```bash
+make help
+make precommit     # same as bash scripts/check.sh
+```
+
 ## Dependencies
 
 | Crate | Purpose |
@@ -38,13 +74,19 @@ cargo fmt
 cargo clippy --fix --allow-dirty --allow-staged
 ```
 
+**Quality gate (run before claiming a change is done):**
+```bash
+bash scripts/check.sh
+# or: make precommit
+```
+
 **To check individually (e.g., before committing):**
 ```bash
 # Check formatting without modifying files
-cargo fmt -- --check
+cargo fmt --all -- --check
 
 # Check lints without fixing
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 ### Git Hooks
@@ -116,4 +158,7 @@ cargo build
 
 # Build release binary for production
 cargo build --release
+
+# Install to ~/.local/bin (same as scripts/install.sh --local without PATH setup)
+make install
 ```

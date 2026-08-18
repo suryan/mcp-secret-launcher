@@ -144,6 +144,16 @@ fn test_run_cli_help() {
 }
 
 #[test]
+fn test_run_cli_version() {
+    let backend = mcp_secret_launcher::keyring_ops::MockKeyring::new();
+    let prompter =
+        mcp_secret_launcher::prompter::MockPrompter::new(secrecy::SecretString::from(""));
+    let args = vec!["mcp-secret-launcher".to_string(), "--version".to_string()];
+    let res = mcp_secret_launcher::run_cli(args, &backend, &prompter, vec![]);
+    assert!(res.is_err());
+}
+
+#[test]
 fn test_get_aws_credentials_cache_race() {
     let mut server = mockito::Server::new();
     // We need a backend that returns None first, then Some after a few calls
