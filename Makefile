@@ -50,8 +50,8 @@ fmt: ## Format sources
 clippy: ## Clippy with -D warnings
 	cd $(ROOT) && cargo clippy --all-targets --all-features -- -D warnings
 
-precommit: ## Full gate (fmt, clippy, tests; coverage if cargo-llvm-cov is installed)
-	cd $(ROOT) && bash scripts/check.sh
+precommit: ## Full gate (fmt, clippy, tests + coverage, osv-scanner CVE audit)
+	cd $(ROOT) && bash scripts/precommit.sh
 
 setup-user: install ## Binary + path.env + shell PATH integration (macOS/Linux)
 	bash "$(ROOT)/scripts/setup-user.sh" --bin "$(BINDIR)/mcp-secret-launcher"

@@ -156,6 +156,37 @@ mcp-secret-launcher aws-auth \
   -- uvx mcp-aws
 ```
 
+### List the AWS accounts and roles you can access
+
+`aws-accounts` signs in the same way as `aws-auth` (it reuses the cached SSO token, and runs
+the browser device flow only when the token is missing or has under 15 minutes left), then
+prints every account assigned to you with your role names in it:
+
+```bash
+mcp-secret-launcher aws-accounts \
+  --sso-url https://my-sso-portal.awsapps.com/start \
+  --region us-east-1
+```
+
+```json
+{"accounts":[{"account_id":"123456789012","account_name":"dev","email":"aws-dev@example.com","roles":["power-user","read-only"]}]}
+```
+
+- stdout holds exactly one JSON line, so it is safe to pipe into `jq` or parse from
+  another program. Device-login prompts, warnings and errors go to stderr.
+- Accounts are sorted by `account_name`, then `account_id`. Each `roles` list is sorted and
+  de-duplicated. An account with no roles has `"roles": []`; a missing name or email is `""`.
+- `--account-id 123456789012` returns just that account (and fetches roles only for it).
+  If the account is not assigned to you, the command fails.
+- On failure the exit code is non-zero, stdout is empty, and stderr says why. If the
+  portal rejects the token (HTTP 401), the cached token is deleted and stderr asks you to
+  rerun the command.
+
+It calls the IAM Identity Center portal API on `https://portal.sso.<region>.amazonaws.com`:
+`ListAccounts` (`GET /assignment/accounts`) and, for each account, `ListAccountRoles`
+(`GET /assignment/roles`). Both follow `nextToken` pagination (100 per page). Role lookups
+run up to 8 at a time, and throttled (HTTP 429) requests are retried with backoff.
+
 ## MCP JSON Integration
 
 ### Example: Securing `mcp-atlassian`

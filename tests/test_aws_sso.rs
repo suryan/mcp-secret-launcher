@@ -802,3 +802,55 @@ fn test_get_aws_credentials_device_auth_400_error() {
         );
     });
 }
+
+/// Nothing listens on port 1, so every request fails at the transport layer.
+const UNREACHABLE_URL: &str = "http://127.0.0.1:1";
+
+#[test]
+fn test_client_registration_unreachable_endpoint() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let backend = MockKeyringBackend::new();
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(UNREACHABLE_URL.to_string()));
+
+    let err = mcp_secret_launcher::aws_sso::get_sso_token(
+        &backend,
+        "https://unreachable.example.com",
+        "us-east-1",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Failed to register OIDC client in region us-east-1"),
+        "{err}"
+    );
+}
+
+#[test]
+fn test_device_authorization_unreachable_endpoint() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let backend = MockKeyringBackend::new();
+    // A cached, still-valid client skips registration and goes straight to device auth.
+    backend
+        .set_secret(
+            "mcp-aws-sso",
+            "client:us-east-1",
+            &SecretString::from(
+                r#"{"clientId": "c", "clientSecret": "s", "clientSecretExpiresAt": 4000000000}"#
+                    .to_string(),
+            ),
+        )
+        .unwrap();
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(UNREACHABLE_URL.to_string()));
+
+    let err = mcp_secret_launcher::aws_sso::get_sso_token(
+        &backend,
+        "https://unreachable.example.com",
+        "us-east-1",
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Failed to start device authorization"),
+        "{err}"
+    );
+}

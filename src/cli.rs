@@ -46,6 +46,18 @@ pub enum Command {
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
+    /// List the AWS SSO accounts and roles you can access, as JSON on stdout
+    AwsAccounts {
+        /// The AWS SSO start URL
+        #[arg(long = "sso-url")]
+        sso_url: String,
+        /// The AWS region for the SSO portal
+        #[arg(long)]
+        region: String,
+        /// Only return this AWS account ID
+        #[arg(long = "account-id")]
+        account_id: Option<String>,
+    },
     /// Store a secret in the keyring (interactive prompt)
     Set {
         /// The profile to store the secret under.

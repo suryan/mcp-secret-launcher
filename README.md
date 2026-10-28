@@ -97,6 +97,13 @@ mcp-secret-launcher aws-auth \
 ```
 The launcher will handle the browser-based auth flow and inject `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc., directly into the server's memory.
 
+Need to know which accounts and roles you can use? `aws-accounts` reuses the same SSO login and prints them as one JSON document on stdout (prompts go to stderr):
+```bash
+mcp-secret-launcher aws-accounts --sso-url https://my-sso.awsapps.com/start --region us-east-1
+# {"accounts":[{"account_id":"123456789012","account_name":"dev","email":"aws-dev@example.com","roles":["power-user","read-only"]}]}
+```
+Add `--account-id 123456789012` to get just one account. See the [Usage Guide](docs/usage.md#list-the-aws-accounts-and-roles-you-can-access).
+
 ---
 
 ## 🛡️ Defense in Depth

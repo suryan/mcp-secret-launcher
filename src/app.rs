@@ -38,6 +38,17 @@ pub fn run_app(
             }
         }
 
+        Command::AwsAccounts {
+            sso_url,
+            region,
+            account_id,
+        } => {
+            // stdout carries only the JSON document; prompts and errors go to stderr.
+            let json =
+                aws_sso::aws_accounts_json(backend, &sso_url, &region, account_id.as_deref())?;
+            println!("{json}");
+        }
+
         Command::Set { profile, key } => {
             let value = prompter.prompt_secret("Enter secret value: ")?;
             keyring_ops::store_secret(backend, &profile, &key, &value)?;
