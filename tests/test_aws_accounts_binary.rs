@@ -13,6 +13,8 @@ fn run(server_url: &str, sso_url: &str, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_mcp-secret-launcher"))
         .env("DBUS_SESSION_BUS_ADDRESS", "dummy:path")
         .env("__MCP_TEST_MOCK_URL", server_url)
+        // Debug builds only: shrink the retry backoff so failures return fast.
+        .env("__MCP_TEST_BACKOFF_MS", "1")
         .args([
             "aws-accounts",
             "--sso-url",
@@ -133,4 +135,58 @@ fn test_binary_unknown_account_id_fails() {
     assert!(!out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout), "");
     assert!(String::from_utf8_lossy(&out.stderr).contains("999999999999"));
+}
+
+#[test]
+fn test_binary_partial_roles_exit_zero_with_warning() {
+    let mut server = mockito::Server::new();
+    let _flow = mock_device_flow(&mut server);
+    let _a = server
+        .mock("GET", "/assignment/accounts")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"accountList": [{"accountId": "123456789012", "accountName": "dev"}, {"accountId": "210987654321", "accountName": "prod"}]}"#)
+        .create();
+    let _bad = server
+        .mock("GET", "/assignment/roles")
+        .match_query(mockito::Matcher::UrlEncoded(
+            "account_id".into(),
+            "210987654321".into(),
+        ))
+        .with_status(429)
+        .create();
+    let _ok = server
+        .mock("GET", "/assignment/roles")
+        .match_query(mockito::Matcher::UrlEncoded(
+            "account_id".into(),
+            "123456789012".into(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"roleList": [{"accountId": "123456789012", "roleName": "read-only"}]}"#)
+        .create();
+
+    let out = run(&server.url(), "https://bin-partial.example.com/start", &[]);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(out.status.success(), "stderr: {stderr}");
+    assert_eq!(stdout.lines().count(), 1, "stdout: {stdout:?}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim_end()).unwrap();
+    assert_eq!(v["accounts"][0]["roles"], serde_json::json!(["read-only"]));
+    assert!(v["accounts"][0].get("roles_error").is_none());
+    assert_eq!(v["accounts"][1]["roles"], serde_json::json!([]));
+    assert!(
+        v["accounts"][1]["roles_error"]
+            .as_str()
+            .unwrap()
+            .contains("HTTP 429"),
+        "{stdout}"
+    );
+    assert!(
+        stderr.contains("roles could not be listed for 1 of 2 account(s)"),
+        "{stderr}"
+    );
+    assert!(!stdout.contains("bin-secret-token"));
 }

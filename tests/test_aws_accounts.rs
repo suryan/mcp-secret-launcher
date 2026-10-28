@@ -78,6 +78,7 @@ fn list(
     id: Option<&str>,
 ) -> anyhow::Result<Vec<AccountRoles>> {
     aws_sso::set_mock_url(Some(server.url()));
+    aws_sso::set_backoff_base_ms(Some(1));
     aws_sso::list_accounts_with_roles(backend, SSO_URL, "us-east-1", id)
 }
 
@@ -168,6 +169,7 @@ fn test_zero_accounts() {
     let roles = server.mock("GET", "/assignment/roles").expect(0).create();
 
     aws_sso::set_mock_url(Some(server.url()));
+    aws_sso::set_backoff_base_ms(Some(1));
     let json = aws_sso::aws_accounts_json(&backend, SSO_URL, "us-east-1", None).unwrap();
     assert_eq!(json, r#"{"accounts":[]}"#);
     roles.assert();
@@ -189,6 +191,7 @@ fn test_json_document_shape() {
     );
 
     aws_sso::set_mock_url(Some(server.url()));
+    aws_sso::set_backoff_base_ms(Some(1));
     let json = aws_sso::aws_accounts_json(&backend, SSO_URL, "us-east-1", None).unwrap();
     assert!(!json.contains('\n'));
     assert!(!json.contains(TOKEN));
@@ -259,7 +262,7 @@ fn test_account_id_filter_unknown_account() {
 }
 
 #[test]
-fn test_role_fetch_error_names_account_and_keeps_token() {
+fn test_role_fetch_error_is_reported_on_that_account_only() {
     let mut server = mockito::Server::new();
     let backend = backend_with_token();
     let _a = accounts_page(
@@ -275,23 +278,31 @@ fn test_role_fetch_error_names_account_and_keeps_token() {
         "account_id=111111111111&max_result=100",
         &roles_body("111111111111", &["read-only"], None),
     );
-    let _bad = server
+    let bad = server
         .mock("GET", "/assignment/roles")
         .match_query(Matcher::UrlEncoded(
             "account_id".into(),
             "222222222222".into(),
         ))
         .with_status(500)
+        .expect(7)
         .create();
 
-    let err = list(&server, &backend, None).unwrap_err();
-    let msg = format!("{err:#}");
+    let accounts = list(&server, &backend, None).unwrap();
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[0].roles, vec!["read-only".to_string()]);
+    assert!(accounts[0].roles_error.is_none());
+    assert!(accounts[1].roles.is_empty());
+    let msg = accounts[1].roles_error.clone().unwrap();
     assert!(
         msg.contains("ListAccountRoles for account 222222222222"),
         "{msg}"
     );
+    assert!(msg.contains("HTTP 500"), "{msg}");
+    assert!(msg.contains("after 7 attempts"), "{msg}");
     assert!(!msg.contains(TOKEN));
     assert!(has_token(&backend), "a 500 must not drop the token");
+    bad.assert();
 }
 
 #[test]
@@ -367,8 +378,10 @@ fn test_repeated_next_token_on_roles_fails() {
         &roles_body("111111111111", &["y"], Some("t")),
     );
 
-    let err = list(&server, &backend, None).unwrap_err();
-    assert!(format!("{err:#}").contains("same nextToken"), "{err:#}");
+    // A broken role listing is reported on that account, not as a failed call.
+    let accounts = list(&server, &backend, None).unwrap();
+    let msg = accounts[0].roles_error.clone().unwrap();
+    assert!(msg.contains("same nextToken"), "{msg}");
 }
 
 #[test]
@@ -386,8 +399,9 @@ fn test_invalid_json_is_an_error() {
         r#"{"accountList": [{"accountId": "111111111111"}]}"#,
     );
     let _r = roles_page(&mut server, "account_id=111111111111&max_result=100", "[");
-    let err = list(&server, &backend, None).unwrap_err();
-    assert!(err.to_string().contains("invalid JSON"), "{err}");
+    let accounts = list(&server, &backend, None).unwrap();
+    let msg = accounts[0].roles_error.clone().unwrap();
+    assert!(msg.contains("invalid JSON"), "{msg}");
 }
 
 #[test]
@@ -418,10 +432,13 @@ fn test_throttling_gives_up_after_max_attempts() {
         .mock("GET", "/assignment/accounts")
         .match_query(Matcher::Any)
         .with_status(429)
-        .expect(4)
+        .expect(7)
         .create();
 
-    assert!(list(&server, &backend, None).is_err());
+    let err = list(&server, &backend, None).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("ListAccounts request failed"), "{msg}");
+    assert!(msg.contains("HTTP 429"), "{msg}");
     assert!(has_token(&backend), "a 429 must not drop the token");
     throttled.assert();
 }
@@ -521,6 +538,7 @@ fn test_run_app_aws_accounts_command() {
         &roles_body("111111111111", &["read-only"], None),
     );
     aws_sso::set_mock_url(Some(server.url()));
+    aws_sso::set_backoff_base_ms(Some(1));
 
     let prompter = MockPrompter::new("unused".to_string().into());
     let cmd = Command::AwsAccounts {
@@ -566,4 +584,218 @@ fn test_cli_parses_aws_accounts() {
         ])
         .is_err()
     );
+}
+
+// ---- Retry, backoff and partial-result behaviour ----------------------------
+
+/// One account `111111111111` in `ListAccounts`.
+fn one_account(server: &mut ServerGuard) -> Mock {
+    accounts_page(
+        server,
+        "max_result=100",
+        r#"{"accountList": [{"accountId": "111111111111", "accountName": "a"}]}"#,
+    )
+}
+
+/// A roles mock for `111111111111` answering `status` exactly `times` times.
+/// mockito prefers a matching mock that still has expected hits left, in
+/// creation order, so create this BEFORE the success mock: it answers its
+/// `times` requests, then the success mock takes over.
+fn roles_failure(server: &mut ServerGuard, status: usize, times: usize) -> Mock {
+    server
+        .mock("GET", "/assignment/roles")
+        .match_query(Matcher::UrlEncoded(
+            "account_id".into(),
+            "111111111111".into(),
+        ))
+        .with_status(status)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"message": "Rate exceeded", "__type": "com.amazonaws.switchboard.portal#TooManyRequestsException"}"#)
+        .expect(times)
+        .create()
+}
+
+fn roles_ok(server: &mut ServerGuard) -> Mock {
+    roles_page(
+        server,
+        "account_id=111111111111&max_result=100",
+        &roles_body("111111111111", &["read-only"], None),
+    )
+}
+
+#[test]
+fn test_roles_429_then_success() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let _a = one_account(&mut server);
+    let throttled = roles_failure(&mut server, 429, 3);
+    let ok = roles_ok(&mut server);
+
+    let accounts = list(&server, &backend, None).unwrap();
+    assert_eq!(accounts[0].roles, vec!["read-only".to_string()]);
+    assert!(accounts[0].roles_error.is_none());
+    throttled.assert();
+    ok.assert();
+}
+
+#[test]
+fn test_roles_503_then_success() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let _a = one_account(&mut server);
+    let unavailable = roles_failure(&mut server, 503, 2);
+    let ok = roles_ok(&mut server);
+
+    let accounts = list(&server, &backend, None).unwrap();
+    assert_eq!(accounts[0].roles, vec!["read-only".to_string()]);
+    unavailable.assert();
+    ok.assert();
+}
+
+#[test]
+fn test_retry_after_header_is_honoured() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let _a = one_account(&mut server);
+    let throttled = server
+        .mock("GET", "/assignment/roles")
+        .match_query(Matcher::Any)
+        .with_status(429)
+        .with_header("retry-after", "1")
+        .expect(1)
+        .create();
+    let ok = roles_ok(&mut server);
+
+    let started = std::time::Instant::now();
+    let accounts = list(&server, &backend, None).unwrap();
+    let waited = started.elapsed();
+    assert_eq!(accounts[0].roles, vec!["read-only".to_string()]);
+    // The backoff base is 1 ms in tests, so only Retry-After explains a 1 s wait.
+    assert!(
+        waited >= std::time::Duration::from_millis(950),
+        "{waited:?}"
+    );
+    throttled.assert();
+    ok.assert();
+}
+
+#[test]
+fn test_persistent_throttling_yields_roles_error_and_ok_json() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let _a = accounts_page(
+        &mut server,
+        "max_result=100",
+        r#"{"accountList": [
+            {"accountId": "111111111111", "accountName": "a"},
+            {"accountId": "222222222222", "accountName": "b"}
+        ]}"#,
+    );
+    let _ok = roles_page(
+        &mut server,
+        "account_id=222222222222&max_result=100",
+        &roles_body("222222222222", &["admin"], None),
+    );
+    let throttled = roles_failure(&mut server, 429, 7);
+
+    aws_sso::set_mock_url(Some(server.url()));
+    aws_sso::set_backoff_base_ms(Some(1));
+    let json = aws_sso::aws_accounts_json(&backend, SSO_URL, "us-east-1", None).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let accts = v["accounts"].as_array().unwrap();
+    assert_eq!(accts[0]["account_id"], "111111111111");
+    assert_eq!(accts[0]["roles"], serde_json::json!([]));
+    let err = accts[0]["roles_error"].as_str().unwrap();
+    assert!(
+        err.contains("HTTP 429 TooManyRequestsException: Rate exceeded (after 7 attempts)"),
+        "{err}"
+    );
+    // A successful account has no roles_error key at all.
+    assert_eq!(accts[1]["roles"], serde_json::json!(["admin"]));
+    assert!(accts[1].get("roles_error").is_none(), "{json}");
+    throttled.assert();
+}
+
+#[test]
+fn test_401_on_roles_is_not_retried() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let _a = one_account(&mut server);
+    let denied = roles_failure(&mut server, 401, 1);
+
+    let err = list(&server, &backend, None).unwrap_err();
+    assert!(format!("{err:#}").contains("HTTP 401"), "{err:#}");
+    assert!(!has_token(&backend));
+    denied.assert();
+}
+
+#[test]
+fn test_403_on_roles_is_not_retried_and_is_per_account() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let _a = one_account(&mut server);
+    let forbidden = roles_failure(&mut server, 403, 1);
+
+    let accounts = list(&server, &backend, None).unwrap();
+    let msg = accounts[0].roles_error.clone().unwrap();
+    assert!(msg.contains("HTTP 403"), "{msg}");
+    assert!(msg.contains("after 1 attempt)"), "{msg}");
+    assert!(has_token(&backend), "a 403 must not drop the token");
+    forbidden.assert();
+}
+
+#[test]
+fn test_400_is_not_retried() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let bad = server
+        .mock("GET", "/assignment/accounts")
+        .match_query(Matcher::Any)
+        .with_status(400)
+        .with_header(
+            "x-amzn-ErrorType",
+            "InvalidRequestException:http://internal/",
+        )
+        .with_body("not json")
+        .expect(1)
+        .create();
+
+    let err = list(&server, &backend, None).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("HTTP 400 InvalidRequestException (after 1 attempt)"),
+        "{msg}"
+    );
+    bad.assert();
+}
+
+#[test]
+fn test_account_id_with_failing_roles_returns_roles_error() {
+    let mut server = mockito::Server::new();
+    let backend = backend_with_token();
+    let _a = one_account(&mut server);
+    let throttled = roles_failure(&mut server, 429, 7);
+
+    let accounts = list(&server, &backend, Some("111111111111")).unwrap();
+    assert_eq!(accounts.len(), 1);
+    assert!(accounts[0].roles_error.is_some());
+    throttled.assert();
+}
+
+#[test]
+fn test_transport_errors_are_retried_then_reported() {
+    // Bind and drop a listener so the port is closed: every connect is refused.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let backend = backend_with_token();
+    aws_sso::set_mock_url(Some(format!("http://127.0.0.1:{port}")));
+    aws_sso::set_backoff_base_ms(Some(1));
+    let err = aws_sso::list_accounts_with_roles(&backend, SSO_URL, "us-east-1", None).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("transport error"), "{msg}");
+    assert!(msg.contains("after 7 attempts"), "{msg}");
+    assert!(has_token(&backend));
 }

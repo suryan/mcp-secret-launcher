@@ -269,7 +269,9 @@ set_manifest -> set_done {
 # ============================================================
 #  AWS-ACCOUNTS COMMAND FLOW (runtime sequence)
 #  Legend: solid green = synchronous (caller blocks until the response).
-#  Every hop in this command is synchronous; parallelism comes from 8 worker threads.
+#  Every hop in this command is synchronous; parallelism comes from 4 worker threads.
+#  Each portal GET retries 429 / 5xx / network errors (7 attempts, full-jitter backoff
+#  250 ms..8 s, Retry-After honoured); 401/403 are never retried.
 # ============================================================
 
 aws_accounts: "'aws-accounts' runtime sequence (solid green = synchronous call)" {
@@ -304,15 +306,19 @@ aws_accounts: "'aws-accounts' runtime sequence (solid green = synchronous call)"
 
   cli -> cli: "NOTE: --account-id filters here, before any role lookup"
 
-  roles: "per account, up to 8 threads in parallel, each looping over nextToken" {
+  roles: "per account, up to 4 threads in parallel, each looping over nextToken" {
     cli -> portal: "GET /assignment/roles?account_id=&max_result=100&next_token=" { class: sync }
+    retry: "on 429 / 5xx / network error: sleep (Retry-After or jitter), retry up to 7 attempts" {
+      cli -> portal: "GET /assignment/roles (retry)" { class: sync }
+    }
   }
 
-  ok: "success" {
+  ok: "success (ListAccounts succeeded)" {
     cli -> caller: "stdout: one JSON line, sorted by account_name; exit 0" { class: sync }
+    cli -> caller: "accounts whose roles still failed: roles: [], roles_error; one stderr warning" { class: sync }
   }
-  fail: "any portal error" {
+  fail: "ListAccounts failed, unknown --account-id, or any HTTP 401" {
     cli -> keyring: "on HTTP 401 only: delete cached token" { class: sync }
-    cli -> caller: "stderr: Error ...; exit 1; stdout empty" { class: sync }
+    cli -> caller: "stderr: Error ... HTTP <status> <AwsType> (after N attempts); exit 1; stdout empty" { class: sync }
   }
 }

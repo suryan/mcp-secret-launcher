@@ -21,8 +21,17 @@ Then:
 
 - `aws-auth` calls `GetRoleCredentials` and execs the target with the temporary credentials.
 - `aws-accounts` calls `ListAccounts` and then `ListAccountRoles` per account (both
-  paginated; roles fetched by up to 8 threads; 429s retried), and prints one JSON document on
-  stdout. A repeated `nextToken` is treated as a portal bug and fails instead of looping.
+  paginated; roles fetched by up to 4 threads), and prints one JSON document on stdout. A
+  repeated `nextToken` is treated as a portal bug and fails instead of looping.
+- Portal requests (`portal_get`) retry HTTP 429, 5xx and network failures up to 7 attempts
+  with full-jitter exponential backoff (250 ms base, 8 s cap), and honour `Retry-After`.
+  401/403 are never retried. A final failure is a `PortalError` carrying the HTTP status,
+  AWS error type and attempt count.
+- The role listing is per account, not all-or-nothing: an account whose roles still fail is
+  emitted with `"roles": []` and `"roles_error"`, the command exits 0, and stderr gets a
+  one-line warning. Only a `ListAccounts` failure or a 401 fails the whole command. The
+  SSO portal throttles per user, so many callers listing at once (for example several AI
+  bots) were each failing on whichever account got throttled.
 
 Any HTTP 401 from the portal deletes the cached token and asks the user to rerun. The token
 is held in a `SecretString`, sent only in the `x-amz-sso_bearer_token` header, and never

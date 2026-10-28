@@ -102,7 +102,7 @@ Need to know which accounts and roles you can use? `aws-accounts` reuses the sam
 mcp-secret-launcher aws-accounts --sso-url https://my-sso.awsapps.com/start --region us-east-1
 # {"accounts":[{"account_id":"123456789012","account_name":"dev","email":"aws-dev@example.com","roles":["power-user","read-only"]}]}
 ```
-Add `--account-id 123456789012` to get just one account. See the [Usage Guide](docs/usage.md#list-the-aws-accounts-and-roles-you-can-access).
+Add `--account-id 123456789012` to get just one account. Throttled (429), 5xx and network failures are retried with jittered backoff; an account whose roles still fail is listed with `"roles": []` and a `"roles_error"` message instead of failing the whole command. See the [Usage Guide](docs/usage.md#list-the-aws-accounts-and-roles-you-can-access).
 
 ---
 

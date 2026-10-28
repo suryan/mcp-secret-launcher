@@ -308,7 +308,9 @@ fn is_unauthorized(err: &anyhow::Error) -> bool {
         matches!(
             cause.downcast_ref::<ureq::Error>(),
             Some(ureq::Error::Status(401, _))
-        )
+        ) || cause
+            .downcast_ref::<PortalError>()
+            .is_some_and(|p| p.status == Some(401))
     })
 }
 
@@ -561,7 +563,12 @@ pub struct AccountRoles {
     /// Account root email address (empty if the portal omits it).
     pub email: String,
     /// Permission-set role names assigned to the user, sorted and de-duplicated.
+    /// Empty when `roles_error` is set.
     pub roles: Vec<String>,
+    /// Why this account's roles could not be listed (after retries). Absent
+    /// from the JSON when the roles were fetched successfully.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roles_error: Option<String>,
 }
 
 /// The `aws-accounts` stdout document: `{"accounts": [...]}`.
@@ -603,12 +610,17 @@ struct RoleInfo {
 
 /// Page size requested from the portal (the API maximum).
 const PORTAL_PAGE_SIZE: &str = "100";
-/// Upper bound on concurrent `ListAccountRoles` requests.
-const ROLE_FETCH_PARALLELISM: usize = 8;
+/// Upper bound on concurrent `ListAccountRoles` requests. Kept low because the
+/// SSO portal throttles bursts (HTTP 429) across all of a user's callers.
+const ROLE_FETCH_PARALLELISM: usize = 4;
 /// Safety cap on pages per paginated listing.
 const MAX_PAGES: usize = 1000;
-/// Attempts per portal request when throttled with HTTP 429.
-const MAX_ATTEMPTS: u32 = 4;
+/// Attempts per portal request (first try plus retries) for retryable failures.
+const MAX_ATTEMPTS: u32 = 7;
+/// Base delay for exponential backoff between retries.
+const BACKOFF_BASE_MS: u64 = 250;
+/// Backoff cap as a multiple of the base (250 ms * 32 = 8 s).
+const BACKOFF_CAP_FACTOR: u64 = 32;
 /// Per-request timeout for portal listing calls.
 const PORTAL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -641,7 +653,171 @@ fn paginate<T>(
     anyhow::bail!("{what}: more than {MAX_PAGES} pages; stopping")
 }
 
-/// Sends one authenticated GET to the SSO portal, retrying HTTP 429 with backoff.
+/// A portal request that failed for good (after any retries).
+///
+/// Carries the HTTP status and the AWS error type when the portal sent them,
+/// so a caller can tell throttling (429) from a server fault (5xx), an auth
+/// failure (401/403) or a network problem. Never contains the bearer token.
+#[derive(Debug)]
+pub struct PortalError {
+    /// HTTP status, or `None` for a transport (network/timeout) failure.
+    pub status: Option<u16>,
+    /// AWS error type from the body `__type` or `x-amzn-ErrorType` header,
+    /// with any namespace prefix stripped (e.g. `TooManyRequestsException`).
+    pub aws_type: Option<String>,
+    /// Short human-readable detail (portal message or transport error).
+    pub detail: String,
+    /// How many attempts were made.
+    pub attempts: u32,
+}
+
+impl std::fmt::Display for PortalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.status {
+            Some(code) => write!(f, "HTTP {code}")?,
+            None => write!(f, "transport error")?,
+        }
+        if let Some(t) = &self.aws_type {
+            write!(f, " {t}")?;
+        }
+        if !self.detail.is_empty() {
+            write!(f, ": {}", self.detail)?;
+        }
+        write!(
+            f,
+            " (after {} attempt{})",
+            self.attempts,
+            if self.attempts == 1 { "" } else { "s" }
+        )
+    }
+}
+
+impl std::error::Error for PortalError {}
+
+/// Largest portal message kept in an error, in characters.
+const ERROR_DETAIL_MAX: usize = 200;
+/// Longest `Retry-After` honoured; larger values are clamped to this.
+const RETRY_AFTER_MAX: Duration = Duration::from_secs(20);
+
+#[cfg(any(test, feature = "test-utils", debug_assertions))]
+static BACKOFF_BASE_OVERRIDE_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Overrides the retry backoff base (the cap scales with it) so tests do not
+/// sleep for real. `None` restores the default. Never compiled into release.
+#[cfg(any(test, feature = "test-utils", debug_assertions))]
+pub fn set_backoff_base_ms(ms: Option<u64>) {
+    BACKOFF_BASE_OVERRIDE_MS.store(ms.unwrap_or(u64::MAX), Ordering::SeqCst);
+}
+
+#[cfg(any(test, feature = "test-utils", debug_assertions))]
+fn backoff_base_ms() -> u64 {
+    match BACKOFF_BASE_OVERRIDE_MS.load(Ordering::SeqCst) {
+        u64::MAX => std::env::var("__MCP_TEST_BACKOFF_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(BACKOFF_BASE_MS),
+        ms => ms,
+    }
+}
+
+#[cfg(not(any(test, feature = "test-utils", debug_assertions)))]
+fn backoff_base_ms() -> u64 {
+    BACKOFF_BASE_MS
+}
+
+/// A uniformly random value in `0..=max`, from std's randomly keyed hasher.
+fn random_up_to(max: u64) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    h.write_u32(nanos);
+    h.finish() % max.saturating_add(1)
+}
+
+/// Full-jitter exponential backoff for retry number `attempt` (0-based):
+/// a random delay in `0..=min(cap, base * 2^attempt)`.
+fn backoff_delay(attempt: u32) -> Duration {
+    let base = backoff_base_ms();
+    let cap = base.saturating_mul(BACKOFF_CAP_FACTOR);
+    let ceiling = base.saturating_mul(1u64 << attempt.min(20)).min(cap);
+    Duration::from_millis(random_up_to(ceiling))
+}
+
+/// Parses a `Retry-After` header given in whole seconds (the form AWS uses).
+fn retry_after(resp: &ureq::Response) -> Option<Duration> {
+    let secs: u64 = resp.header("retry-after")?.trim().parse().ok()?;
+    Some(Duration::from_secs(secs).min(RETRY_AFTER_MAX))
+}
+
+/// Whether a failed request is worth retrying: throttling, server faults and
+/// network-level failures. 401/403 and other 4xx are never retried.
+fn is_retryable(err: &ureq::Error) -> bool {
+    match err {
+        ureq::Error::Status(code, _) => *code == 429 || (500..=599).contains(code),
+        ureq::Error::Transport(t) => matches!(
+            t.kind(),
+            ureq::ErrorKind::Dns | ureq::ErrorKind::ConnectionFailed | ureq::ErrorKind::Io
+        ),
+    }
+}
+
+/// Strips an AWS namespace/URL decoration from an error type:
+/// `com.amazonaws.x#TooManyRequestsException` or `Type:http://...` -> `Type`.
+fn clean_aws_type(raw: &str) -> Option<String> {
+    let t = raw.rsplit('#').next().unwrap_or(raw);
+    let t = t.split(':').next().unwrap_or(t).trim();
+    (!t.is_empty()).then(|| t.to_string())
+}
+
+/// Turns a final failed request into a [`PortalError`].
+fn portal_error(err: ureq::Error, attempts: u32) -> PortalError {
+    match err {
+        ureq::Error::Status(code, resp) => {
+            let header_type = resp.header("x-amzn-errortype").and_then(clean_aws_type);
+            let body = resp.into_string().unwrap_or_default();
+            let json: Option<serde_json::Value> = serde_json::from_str(&body).ok();
+            let field = |names: &[&str]| {
+                json.as_ref().and_then(|v| {
+                    names
+                        .iter()
+                        .find_map(|n| v.get(*n).and_then(serde_json::Value::as_str))
+                        .map(str::to_string)
+                })
+            };
+            let aws_type = field(&["__type", "code", "Code"])
+                .as_deref()
+                .and_then(clean_aws_type)
+                .or(header_type);
+            let detail: String = field(&["message", "Message"])
+                .unwrap_or_default()
+                .chars()
+                .take(ERROR_DETAIL_MAX)
+                .collect();
+            PortalError {
+                status: Some(code),
+                aws_type,
+                detail,
+                attempts,
+            }
+        }
+        ureq::Error::Transport(t) => PortalError {
+            status: None,
+            aws_type: None,
+            detail: t.to_string().chars().take(ERROR_DETAIL_MAX).collect(),
+            attempts,
+        },
+    }
+}
+
+/// Sends one authenticated GET to the SSO portal.
+///
+/// Retries throttling (429), server faults (5xx) and network failures up to
+/// [`MAX_ATTEMPTS`] times with full-jitter exponential backoff, honouring a
+/// `Retry-After` header when the portal sends one. A final failure is a
+/// [`PortalError`] naming the HTTP status and AWS error type.
 fn portal_get(
     agent: &ureq::Agent,
     url: &str,
@@ -657,11 +833,17 @@ fn portal_get(
             req = req.query(k, v);
         }
         match req.call() {
-            Err(ureq::Error::Status(429, _)) if attempt + 1 < MAX_ATTEMPTS => {
-                std::thread::sleep(Duration::from_millis(200 << attempt));
+            Ok(resp) => return Ok(resp),
+            Err(e) if is_retryable(&e) && attempt + 1 < MAX_ATTEMPTS => {
+                let wait = match &e {
+                    ureq::Error::Status(_, resp) => retry_after(resp),
+                    ureq::Error::Transport(_) => None,
+                }
+                .unwrap_or_else(|| backoff_delay(attempt));
+                std::thread::sleep(wait);
                 attempt += 1;
             }
-            other => return other.map_err(Into::into),
+            Err(e) => return Err(portal_error(e, attempt + 1).into()),
         }
     }
 }
@@ -715,14 +897,14 @@ fn list_account_roles(
 }
 
 /// Fetches roles for every account with at most `ROLE_FETCH_PARALLELISM`
-/// requests in flight. Results keep the input order; the first error (in
-/// account order) wins.
+/// requests in flight. Results keep the input order, one per account, so one
+/// account's failure never hides the others' roles.
 fn fetch_roles_parallel(
     agent: &ureq::Agent,
     base_url: &str,
     token: &SecretString,
     account_ids: &[String],
-) -> anyhow::Result<Vec<Vec<String>>> {
+) -> Vec<anyhow::Result<Vec<String>>> {
     let next = std::sync::atomic::AtomicUsize::new(0);
     let results: Vec<std::sync::Mutex<Option<anyhow::Result<Vec<String>>>>> = account_ids
         .iter()
@@ -763,9 +945,13 @@ fn fetch_roles_parallel(
 /// `account_id` is given, only that account is returned (and only its roles
 /// are fetched). Accounts are sorted by name, then ID.
 ///
+/// An account whose roles still cannot be listed after retries is returned
+/// with empty `roles` and `roles_error` set, so the listing stays usable.
+///
 /// # Errors
-/// Returns an error if authentication fails, any portal call fails (a 401
-/// also deletes the cached token), or `account_id` is not assigned to the user.
+/// Returns an error if authentication fails, `ListAccounts` fails, any portal
+/// call answers 401 (which also deletes the cached token), or `account_id` is
+/// not assigned to the user.
 pub fn list_accounts_with_roles(
     backend: &dyn KeyringBackend,
     sso_url: &str,
@@ -789,16 +975,32 @@ pub fn list_accounts_with_roles(
             }
         }
         let ids: Vec<String> = accounts.iter().map(|a| a.account_id.clone()).collect();
-        let roles = fetch_roles_parallel(&agent, &base_url, &token, &ids)?;
+        let mut roles = fetch_roles_parallel(&agent, &base_url, &token, &ids);
+        // A rejected token fails the whole call (and is forgotten below); any
+        // other per-account failure is reported on that account only.
+        if let Some(pos) = roles
+            .iter()
+            .position(|r| r.as_ref().is_err_and(is_unauthorized))
+            && let Err(e) = roles.swap_remove(pos)
+        {
+            return Err(e);
+        }
 
         let mut out: Vec<AccountRoles> = accounts
             .into_iter()
             .zip(roles)
-            .map(|(a, roles)| AccountRoles {
-                account_id: a.account_id,
-                account_name: a.account_name.unwrap_or_default(),
-                email: a.email_address.unwrap_or_default(),
-                roles,
+            .map(|(a, roles)| {
+                let (roles, roles_error) = match roles {
+                    Ok(r) => (r, None),
+                    Err(e) => (Vec::new(), Some(format!("{e:#}"))),
+                };
+                AccountRoles {
+                    account_id: a.account_id,
+                    account_name: a.account_name.unwrap_or_default(),
+                    email: a.email_address.unwrap_or_default(),
+                    roles,
+                    roles_error,
+                }
             })
             .collect();
         out.sort_by(|a, b| {
@@ -814,6 +1016,8 @@ pub fn list_accounts_with_roles(
 
 /// Builds the `aws-accounts` stdout document as a single JSON line.
 ///
+/// Prints a one-line warning to stderr when any account carries `roles_error`.
+///
 /// # Errors
 /// Same as [`list_accounts_with_roles`].
 pub fn aws_accounts_json(
@@ -823,6 +1027,13 @@ pub fn aws_accounts_json(
     account_id: Option<&str>,
 ) -> anyhow::Result<String> {
     let accounts = list_accounts_with_roles(backend, sso_url, region, account_id)?;
+    let failed = accounts.iter().filter(|a| a.roles_error.is_some()).count();
+    if failed > 0 {
+        eprintln!(
+            "Warning: roles could not be listed for {failed} of {} account(s); see \"roles_error\" in the output",
+            accounts.len()
+        );
+    }
     Ok(serde_json::to_string(&AccountsReport { accounts })?)
 }
 
@@ -846,6 +1057,71 @@ mod tests {
     fn test_is_unauthorized_only_matches_401() {
         let other = anyhow::anyhow!("boom").context("wrapped");
         assert!(!is_unauthorized(&other));
+        let portal = |status| {
+            anyhow::Error::from(PortalError {
+                status,
+                aws_type: None,
+                detail: String::new(),
+                attempts: 1,
+            })
+            .context("wrapped")
+        };
+        assert!(is_unauthorized(&portal(Some(401))));
+        assert!(!is_unauthorized(&portal(Some(403))));
+        assert!(!is_unauthorized(&portal(None)));
+    }
+
+    #[test]
+    fn test_backoff_is_full_jitter_and_capped() {
+        set_backoff_base_ms(None);
+        for attempt in 0..12 {
+            let ceiling = (BACKOFF_BASE_MS << attempt).min(BACKOFF_BASE_MS * BACKOFF_CAP_FACTOR);
+            for _ in 0..50 {
+                let d = backoff_delay(attempt);
+                assert!(d <= Duration::from_millis(ceiling), "{attempt}: {d:?}");
+            }
+        }
+        // The cap is 8 s at the default base.
+        assert_eq!(BACKOFF_BASE_MS * BACKOFF_CAP_FACTOR, 8_000);
+        // Jitter actually varies.
+        let samples: std::collections::HashSet<u64> =
+            (0..50).map(|_| random_up_to(1_000_000)).collect();
+        assert!(samples.len() > 10);
+        assert_eq!(random_up_to(0), 0);
+    }
+
+    #[test]
+    fn test_clean_aws_type() {
+        assert_eq!(
+            clean_aws_type("com.amazonaws.switchboard.portal#TooManyRequestsException").as_deref(),
+            Some("TooManyRequestsException")
+        );
+        assert_eq!(
+            clean_aws_type("UnauthorizedException:http://internal.amazon.com/").as_deref(),
+            Some("UnauthorizedException")
+        );
+        assert_eq!(clean_aws_type("  "), None);
+    }
+
+    #[test]
+    fn test_portal_error_display() {
+        let e = PortalError {
+            status: Some(429),
+            aws_type: Some("TooManyRequestsException".into()),
+            detail: "Rate exceeded".into(),
+            attempts: 7,
+        };
+        assert_eq!(
+            e.to_string(),
+            "HTTP 429 TooManyRequestsException: Rate exceeded (after 7 attempts)"
+        );
+        let t = PortalError {
+            status: None,
+            aws_type: None,
+            detail: String::new(),
+            attempts: 1,
+        };
+        assert_eq!(t.to_string(), "transport error (after 1 attempt)");
     }
 
     #[test]

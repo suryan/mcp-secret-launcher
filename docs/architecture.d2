@@ -129,7 +129,7 @@ Launcher: mcp-secret-launcher {
     tooltip: |md
       - get_sso_token: keyring cache (15 min margin) → IPC file lock → device flow
       - get_aws_credentials: GetRoleCredentials (aws-auth)
-      - list_accounts_with_roles: ListAccounts + ListAccountRoles, 8 threads (aws-accounts)
+      - list_accounts_with_roles: ListAccounts + ListAccountRoles, 4 threads, jittered retry of 429/5xx/network, per-account roles_error (aws-accounts)
       - HTTP 401 → delete cached token
     |
   }
