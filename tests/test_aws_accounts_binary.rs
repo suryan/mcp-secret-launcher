@@ -16,10 +16,9 @@ fn run(server_url: &str, sso_url: &str, extra: &[&str]) -> Output {
         // Debug builds only: shrink the retry backoff so failures return fast.
         .env("__MCP_TEST_BACKOFF_MS", "1")
         // These tests exercise the interactive (mocked) device-auth flow. The
-        // spawned child's stdin is not a real TTY, which would otherwise auto-
-        // resolve to NoLogin; MCP_FAKE_TTY=1 (debug builds only) simulates a
-        // terminal so the interactive path runs as intended.
-        .env("MCP_FAKE_TTY", "1")
+        // mode is now driven solely by the --no-login flag (not stdin/TTY
+        // state), so a non-TTY spawn without the flag resolves to Interactive
+        // and runs the mocked device flow as intended.
         .args([
             "aws-accounts",
             "--sso-url",
@@ -206,7 +205,6 @@ fn test_binary_no_login_fails_fast_empty_stdout() {
     let out = Command::new(env!("CARGO_BIN_EXE_mcp-secret-launcher"))
         .env("DBUS_SESSION_BUS_ADDRESS", "dummy:path")
         .env("__MCP_TEST_BACKOFF_MS", "1")
-        .env("MCP_FAKE_TTY", "1") // even "as if TTY", the explicit flag wins
         .args([
             "aws-accounts",
             "--sso-url",

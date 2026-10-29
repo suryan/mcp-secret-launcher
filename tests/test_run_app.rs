@@ -111,15 +111,9 @@ fn test_run_app_aws_auth_command() {
         cmd: vec!["true".to_string()],
     };
 
-    temp_env::with_vars(
-        [
-            ("__MCP_TEST_NO_EXEC", Some("1")),
-            ("MCP_FAKE_TTY", Some("1")),
-        ],
-        || {
-            run_app(cmd_aws, &backend, &prompter, Vec::new()).unwrap();
-        },
-    );
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        run_app(cmd_aws, &backend, &prompter, Vec::new()).unwrap();
+    });
 
     // Test without profile
     let cmd_aws_no_prof = Command::AwsAuth {
@@ -131,13 +125,7 @@ fn test_run_app_aws_auth_command() {
         no_login: false,
         cmd: vec!["true".to_string()],
     };
-    temp_env::with_vars(
-        [
-            ("__MCP_TEST_NO_EXEC", Some("1")),
-            ("MCP_FAKE_TTY", Some("1")),
-        ],
-        || {
-            run_app(cmd_aws_no_prof, &backend, &prompter, Vec::new()).unwrap();
-        },
-    );
+    temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {
+        run_app(cmd_aws_no_prof, &backend, &prompter, Vec::new()).unwrap();
+    });
 }

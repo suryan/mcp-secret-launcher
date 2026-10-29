@@ -48,36 +48,22 @@ pub enum LoginMode {
 }
 
 impl LoginMode {
-    /// Resolve the effective mode: `--no-login` forces [`LoginMode::NoLogin`];
-    /// otherwise a non-interactive stdin (not a TTY) also forces it, so a
-    /// headless caller can never be dragged into a browser prompt even if it
-    /// forgets the flag.
+    /// Resolve the effective mode. [`LoginMode::NoLogin`] is driven ONLY by the
+    /// explicit `--no-login` flag; it is never inferred from stdin/TTY state.
+    ///
+    /// This is deliberate: aws-shell is a headless stdio MCP server, yet its
+    /// product requirement is that a missing token must open the browser SSO
+    /// prompt rather than fast-fail — so a non-TTY stdin must NOT disable the
+    /// device flow. The transport stays alive during the browser flow because
+    /// the browser opener's stdio is isolated (see `open_browser_detached`).
+    /// A caller that genuinely wants fast-fail (CI, cron) opts in with
+    /// `--no-login`.
     #[must_use]
     pub fn resolve(no_login_flag: bool) -> Self {
-        if no_login_flag || !stdin_is_terminal() {
+        if no_login_flag {
             Self::NoLogin
         } else {
             Self::Interactive
-        }
-    }
-}
-
-/// True when stdin is an interactive terminal. Overridable in tests.
-#[cfg(not(any(test, feature = "test-utils", debug_assertions)))]
-fn stdin_is_terminal() -> bool {
-    use std::io::IsTerminal;
-    std::io::stdin().is_terminal()
-}
-
-/// Test/dev build: honour `MCP_FAKE_TTY` so tests can force either branch.
-#[cfg(any(test, feature = "test-utils", debug_assertions))]
-fn stdin_is_terminal() -> bool {
-    match std::env::var("MCP_FAKE_TTY").as_deref() {
-        Ok("1") => true,
-        Ok("0") => false,
-        _ => {
-            use std::io::IsTerminal;
-            std::io::stdin().is_terminal()
         }
     }
 }
@@ -88,10 +74,16 @@ mod login_mode_tests {
 
     #[test]
     fn resolve_flag_forces_no_login() {
-        // The explicit flag forces NoLogin regardless of TTY state — this is
-        // what mcp-aws-shell passes. No env mutation needed: the flag short-
-        // circuits before the TTY check.
+        // NoLogin is driven solely by the explicit flag.
         assert_eq!(LoginMode::resolve(true), LoginMode::NoLogin);
+    }
+
+    #[test]
+    fn resolve_without_flag_is_interactive_even_when_headless() {
+        // Regression guard: the MCP path spawns the launcher with a non-TTY
+        // stdin, and it MUST still resolve to Interactive so a missing token
+        // opens the browser prompt instead of fast-failing.
+        assert_eq!(LoginMode::resolve(false), LoginMode::Interactive);
     }
 
     #[test]
