@@ -42,6 +42,12 @@ pub enum Command {
         /// Optional profile to load standard secrets alongside AWS credentials
         #[arg(long)]
         profile: Option<String>,
+        /// Never start the interactive device-authorization flow: if no valid
+        /// cached SSO token exists, fail fast instead of opening a browser.
+        /// Intended for headless callers such as a stdio MCP server. A
+        /// non-interactive stdin (not a TTY) implies this automatically.
+        #[arg(long = "no-login")]
+        no_login: bool,
         /// Target command and arguments (after --)
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
@@ -57,6 +63,12 @@ pub enum Command {
         /// Only return this AWS account ID
         #[arg(long = "account-id")]
         account_id: Option<String>,
+        /// Never start the interactive device-authorization flow: if no valid
+        /// cached SSO token exists, fail fast instead of opening a browser.
+        /// Intended for headless callers such as a stdio MCP server. A
+        /// non-interactive stdin (not a TTY) implies this automatically.
+        #[arg(long = "no-login")]
+        no_login: bool,
     },
     /// Store a secret in the keyring (interactive prompt)
     Set {

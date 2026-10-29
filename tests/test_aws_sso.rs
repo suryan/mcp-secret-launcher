@@ -98,6 +98,7 @@ fn test_get_aws_credentials_end_to_end_new_token() {
         "us-east-1",
         "123",
         "MyRole",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     )
     .unwrap();
 
@@ -156,6 +157,7 @@ fn test_get_aws_credentials_cached_token_valid() {
         "us-east-1",
         "123",
         "MyRole",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     )
     .unwrap();
 
@@ -204,6 +206,7 @@ fn test_get_aws_credentials_on_401_deletes_token() {
             "us-east-1",
             "123",
             "MyRole",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
 
         // If it didn't exit (which it shouldn't in our tests hopefully), check if it deleted the token
@@ -252,6 +255,7 @@ fn test_get_aws_credentials_device_code_expired() {
             "us-east-1",
             "123",
             "MyRole",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("expired"));
@@ -300,6 +304,7 @@ fn test_get_aws_credentials_client_cached() {
         "us-east-1",
         "1",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     )
     .unwrap();
 
@@ -364,6 +369,7 @@ fn test_get_aws_credentials_polling_logic() {
         "us-east-1",
         "A",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     )
     .unwrap();
 
@@ -392,6 +398,7 @@ fn test_get_aws_credentials_client_reg_error() {
         "us-east-1",
         "A",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     );
     assert!(res.is_err());
     assert!(
@@ -444,6 +451,7 @@ fn test_get_aws_credentials_loop_timeout() {
             "us-east-1",
             "A",
             "R",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("expired"));
@@ -483,6 +491,7 @@ fn test_get_aws_credentials_access_denied() {
             "us-east-1",
             "A",
             "R",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("denied"));
@@ -508,6 +517,7 @@ fn test_get_aws_credentials_client_reg_transport_error() {
         "us-east-1",
         "A",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     );
     assert!(res.is_err());
 }
@@ -537,6 +547,7 @@ fn test_get_aws_credentials_device_auth_error() {
         "us-east-1",
         "A",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     );
     assert!(res.is_err());
 }
@@ -590,6 +601,7 @@ fn test_get_aws_credentials_slow_down() {
         "us-east-1",
         "A",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     );
     assert!(res.is_ok());
 }
@@ -637,6 +649,7 @@ fn test_get_role_credentials_error() {
         "us-east-1",
         "A",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     );
     assert!(res.is_err());
 }
@@ -663,6 +676,7 @@ fn test_get_aws_credentials_lock_fallback() {
             "us-east-1",
             "A",
             "R",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         // It should still fail if /root is blocked for BOTH File::create and tempfile(),
         // but it will hit the warning line (205) either way.
@@ -699,6 +713,7 @@ fn test_get_aws_credentials_token_other_error() {
             "us-east-1",
             "A",
             "R",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         assert!(res.is_err());
         assert!(
@@ -733,6 +748,7 @@ fn test_get_aws_credentials_token_transport_error() {
             "us-east-1",
             "A",
             "R",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         assert!(res.is_err());
     });
@@ -758,6 +774,7 @@ fn test_get_aws_credentials_client_reg_400_error() {
             "us-east-1",
             "A",
             "R",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         assert!(res.is_err());
         assert!(
@@ -793,6 +810,7 @@ fn test_get_aws_credentials_device_auth_400_error() {
             "us-east-1",
             "A",
             "R",
+            mcp_secret_launcher::aws_sso::LoginMode::Interactive,
         );
         assert!(res.is_err());
         assert!(
@@ -816,6 +834,7 @@ fn test_client_registration_unreachable_endpoint() {
         &backend,
         "https://unreachable.example.com",
         "us-east-1",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     )
     .unwrap_err();
     assert!(
@@ -846,6 +865,7 @@ fn test_device_authorization_unreachable_endpoint() {
         &backend,
         "https://unreachable.example.com",
         "us-east-1",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     )
     .unwrap_err();
     assert!(
@@ -853,4 +873,69 @@ fn test_device_authorization_unreachable_endpoint() {
             .contains("Failed to start device authorization"),
         "{err}"
     );
+}
+
+// ---- NoLogin (headless) behavior -------------------------------------------
+
+const SSO_URL_NL: &str = "https://sso.example.com";
+// token cache key for SSO_URL_NL (sha256 of the URL), reused from above tests.
+const TOKEN_KEY_NL: &str = "token:166f46b2b78da2cd5f13cdaaac765ddbcf5765a94a2f8b7056e44c0bfcbcc03c";
+
+#[test]
+fn no_login_without_cached_token_fails_fast_no_network() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let backend = MockKeyringBackend::new();
+    // Point the mock portal at an unreachable URL: if NoLogin wrongly tried to
+    // register/device-auth, we'd get a transport error, not SsoLoginRequired.
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(UNREACHABLE_URL.to_string()));
+
+    let err = mcp_secret_launcher::aws_sso::get_sso_token(
+        &backend,
+        SSO_URL_NL,
+        "us-east-1",
+        mcp_secret_launcher::aws_sso::LoginMode::NoLogin,
+    )
+    .unwrap_err();
+
+    // It must be the structured SsoLoginRequired, naming the URL, with no
+    // mention of a network/registration failure (proving no portal call ran).
+    assert!(
+        err.downcast_ref::<mcp_secret_launcher::aws_sso::SsoLoginRequired>()
+            .is_some(),
+        "expected SsoLoginRequired, got: {err}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains(SSO_URL_NL), "{msg}");
+    assert!(
+        !msg.contains("register"),
+        "should not have hit the portal: {msg}"
+    );
+    mcp_secret_launcher::aws_sso::set_mock_url(None);
+}
+
+#[test]
+fn no_login_with_valid_cached_token_succeeds() {
+    let _guard = TEST_MUTEX.lock().unwrap();
+    let backend = MockKeyringBackend::new();
+    mcp_secret_launcher::aws_sso::set_mock_time(Some(1000));
+    let token_json =
+        r#"{"accessToken": "cached-ok", "expiresIn": 3600, "issuedAt": 1000}"#.to_string();
+    backend
+        .set_secret("mcp-aws-sso", TOKEN_KEY_NL, &SecretString::from(token_json))
+        .unwrap();
+    // Unreachable portal: a success here proves the cached token short-circuits
+    // before any network use, even in NoLogin mode.
+    mcp_secret_launcher::aws_sso::set_mock_url(Some(UNREACHABLE_URL.to_string()));
+
+    let token = mcp_secret_launcher::aws_sso::get_sso_token(
+        &backend,
+        SSO_URL_NL,
+        "us-east-1",
+        mcp_secret_launcher::aws_sso::LoginMode::NoLogin,
+    )
+    .unwrap();
+    assert_eq!(token.expose_secret(), "cached-ok");
+
+    mcp_secret_launcher::aws_sso::set_mock_time(None);
+    mcp_secret_launcher::aws_sso::set_mock_url(None);
 }

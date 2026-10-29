@@ -79,7 +79,13 @@ fn list(
 ) -> anyhow::Result<Vec<AccountRoles>> {
     aws_sso::set_mock_url(Some(server.url()));
     aws_sso::set_backoff_base_ms(Some(1));
-    aws_sso::list_accounts_with_roles(backend, SSO_URL, "us-east-1", id)
+    aws_sso::list_accounts_with_roles(
+        backend,
+        SSO_URL,
+        "us-east-1",
+        id,
+        aws_sso::LoginMode::Interactive,
+    )
 }
 
 #[test]
@@ -170,7 +176,14 @@ fn test_zero_accounts() {
 
     aws_sso::set_mock_url(Some(server.url()));
     aws_sso::set_backoff_base_ms(Some(1));
-    let json = aws_sso::aws_accounts_json(&backend, SSO_URL, "us-east-1", None).unwrap();
+    let json = aws_sso::aws_accounts_json(
+        &backend,
+        SSO_URL,
+        "us-east-1",
+        None,
+        aws_sso::LoginMode::Interactive,
+    )
+    .unwrap();
     assert_eq!(json, r#"{"accounts":[]}"#);
     roles.assert();
 }
@@ -192,7 +205,14 @@ fn test_json_document_shape() {
 
     aws_sso::set_mock_url(Some(server.url()));
     aws_sso::set_backoff_base_ms(Some(1));
-    let json = aws_sso::aws_accounts_json(&backend, SSO_URL, "us-east-1", None).unwrap();
+    let json = aws_sso::aws_accounts_json(
+        &backend,
+        SSO_URL,
+        "us-east-1",
+        None,
+        aws_sso::LoginMode::Interactive,
+    )
+    .unwrap();
     assert!(!json.contains('\n'));
     assert!(!json.contains(TOKEN));
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -545,6 +565,7 @@ fn test_run_app_aws_accounts_command() {
         sso_url: SSO_URL.to_string(),
         region: "us-east-1".to_string(),
         account_id: Some("111111111111".to_string()),
+        no_login: false,
     };
     mcp_secret_launcher::run_app(cmd, &backend, &prompter, Vec::new()).unwrap();
 }
@@ -566,6 +587,7 @@ fn test_cli_parses_aws_accounts() {
             sso_url,
             region,
             account_id,
+            no_login: _,
         } => {
             assert_eq!(sso_url, SSO_URL);
             assert_eq!(region, "ap-southeast-2");
@@ -700,7 +722,14 @@ fn test_persistent_throttling_yields_roles_error_and_ok_json() {
 
     aws_sso::set_mock_url(Some(server.url()));
     aws_sso::set_backoff_base_ms(Some(1));
-    let json = aws_sso::aws_accounts_json(&backend, SSO_URL, "us-east-1", None).unwrap();
+    let json = aws_sso::aws_accounts_json(
+        &backend,
+        SSO_URL,
+        "us-east-1",
+        None,
+        aws_sso::LoginMode::Interactive,
+    )
+    .unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     let accts = v["accounts"].as_array().unwrap();
     assert_eq!(accts[0]["account_id"], "111111111111");
@@ -793,7 +822,14 @@ fn test_transport_errors_are_retried_then_reported() {
     let backend = backend_with_token();
     aws_sso::set_mock_url(Some(format!("http://127.0.0.1:{port}")));
     aws_sso::set_backoff_base_ms(Some(1));
-    let err = aws_sso::list_accounts_with_roles(&backend, SSO_URL, "us-east-1", None).unwrap_err();
+    let err = aws_sso::list_accounts_with_roles(
+        &backend,
+        SSO_URL,
+        "us-east-1",
+        None,
+        aws_sso::LoginMode::Interactive,
+    )
+    .unwrap_err();
     let msg = format!("{err:#}");
     assert!(msg.contains("transport error"), "{msg}");
     assert!(msg.contains("after 7 attempts"), "{msg}");

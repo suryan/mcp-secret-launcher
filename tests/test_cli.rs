@@ -211,6 +211,7 @@ fn test_get_aws_credentials_cache_race() {
         "us-east-1",
         "A",
         "R",
+        mcp_secret_launcher::aws_sso::LoginMode::Interactive,
     );
     assert!(res.is_ok());
     // Should have called get_secret at least twice (first fails, second succeeds after "lock")

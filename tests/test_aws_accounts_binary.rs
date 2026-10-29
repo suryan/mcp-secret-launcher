@@ -15,6 +15,11 @@ fn run(server_url: &str, sso_url: &str, extra: &[&str]) -> Output {
         .env("__MCP_TEST_MOCK_URL", server_url)
         // Debug builds only: shrink the retry backoff so failures return fast.
         .env("__MCP_TEST_BACKOFF_MS", "1")
+        // These tests exercise the interactive (mocked) device-auth flow. The
+        // spawned child's stdin is not a real TTY, which would otherwise auto-
+        // resolve to NoLogin; MCP_FAKE_TTY=1 (debug builds only) simulates a
+        // terminal so the interactive path runs as intended.
+        .env("MCP_FAKE_TTY", "1")
         .args([
             "aws-accounts",
             "--sso-url",
@@ -189,4 +194,40 @@ fn test_binary_partial_roles_exit_zero_with_warning() {
         "{stderr}"
     );
     assert!(!stdout.contains("bin-secret-token"));
+}
+
+#[test]
+fn test_binary_no_login_fails_fast_empty_stdout() {
+    // With --no-login and no cached token, the binary must NOT attempt the
+    // device flow: it exits non-zero, writes nothing to stdout, and the stderr
+    // names the SSO-login-required condition. A dummy DBUS keeps the real
+    // keyring unreachable (no cached token). No mock portal is registered, so
+    // any portal attempt would surface as a different error.
+    let out = Command::new(env!("CARGO_BIN_EXE_mcp-secret-launcher"))
+        .env("DBUS_SESSION_BUS_ADDRESS", "dummy:path")
+        .env("__MCP_TEST_BACKOFF_MS", "1")
+        .env("MCP_FAKE_TTY", "1") // even "as if TTY", the explicit flag wins
+        .args([
+            "aws-accounts",
+            "--sso-url",
+            "https://no-login.example.com/start",
+            "--region",
+            "us-east-1",
+            "--no-login",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success(), "should fail without a token");
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("SSO login required"), "{stderr}");
+    assert!(
+        stderr.contains("https://no-login.example.com/start"),
+        "{stderr}"
+    );
 }

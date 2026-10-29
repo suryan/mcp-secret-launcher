@@ -42,10 +42,17 @@ pub fn run_app(
             sso_url,
             region,
             account_id,
+            no_login,
         } => {
             // stdout carries only the JSON document; prompts and errors go to stderr.
-            let json =
-                aws_sso::aws_accounts_json(backend, &sso_url, &region, account_id.as_deref())?;
+            let login_mode = aws_sso::LoginMode::resolve(no_login);
+            let json = aws_sso::aws_accounts_json(
+                backend,
+                &sso_url,
+                &region,
+                account_id.as_deref(),
+                login_mode,
+            )?;
             println!("{json}");
         }
 
@@ -79,11 +86,19 @@ pub fn run_app(
             account_id,
             role_name,
             profile,
+            no_login,
             cmd,
         } => {
             // First load AWS credentials
-            let mut secrets =
-                aws_sso::get_aws_credentials(backend, &sso_url, &region, &account_id, &role_name)?;
+            let login_mode = aws_sso::LoginMode::resolve(no_login);
+            let mut secrets = aws_sso::get_aws_credentials(
+                backend,
+                &sso_url,
+                &region,
+                &account_id,
+                &role_name,
+                login_mode,
+            )?;
 
             // Then merge with profile secrets if specified
             if let Some(p) = profile {

@@ -10,6 +10,101 @@ use std::time::Duration;
 
 use fs4::fs_std::FileExt;
 
+/// Returned when a valid SSO token is required but none is cached and the
+/// interactive device-authorization flow is suppressed (`--no-login`, or a
+/// non-interactive stdin). Carries the SSO URL so a caller can print a precise
+/// "authenticate first" hint. A headless caller (e.g. a stdio MCP server) maps
+/// this to a fast, structured error instead of blocking on a browser prompt.
+#[derive(Debug, Clone)]
+pub struct SsoLoginRequired {
+    /// The SSO start URL that needs an interactive login.
+    pub sso_url: String,
+}
+
+impl std::fmt::Display for SsoLoginRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SSO login required: no valid cached token for {} and interactive \
+             device authorization is disabled. Run `mcp-secret-launcher aws-auth \
+             --sso-url {} ... -- <cmd>` (or your SSO login) in a terminal to \
+             authenticate, then retry.",
+            self.sso_url, self.sso_url
+        )
+    }
+}
+
+impl std::error::Error for SsoLoginRequired {}
+
+/// Whether the interactive device-authorization flow may run when no valid
+/// cached token exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginMode {
+    /// Run the device flow (open a browser, poll) if needed. For interactive use.
+    Interactive,
+    /// Never run the device flow; return [`SsoLoginRequired`] when no valid
+    /// cached token exists. For headless callers (stdio MCP servers, CI).
+    NoLogin,
+}
+
+impl LoginMode {
+    /// Resolve the effective mode: `--no-login` forces [`LoginMode::NoLogin`];
+    /// otherwise a non-interactive stdin (not a TTY) also forces it, so a
+    /// headless caller can never be dragged into a browser prompt even if it
+    /// forgets the flag.
+    #[must_use]
+    pub fn resolve(no_login_flag: bool) -> Self {
+        if no_login_flag || !stdin_is_terminal() {
+            Self::NoLogin
+        } else {
+            Self::Interactive
+        }
+    }
+}
+
+/// True when stdin is an interactive terminal. Overridable in tests.
+#[cfg(not(any(test, feature = "test-utils", debug_assertions)))]
+fn stdin_is_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
+}
+
+/// Test/dev build: honour `MCP_FAKE_TTY` so tests can force either branch.
+#[cfg(any(test, feature = "test-utils", debug_assertions))]
+fn stdin_is_terminal() -> bool {
+    match std::env::var("MCP_FAKE_TTY").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => {
+            use std::io::IsTerminal;
+            std::io::stdin().is_terminal()
+        }
+    }
+}
+
+#[cfg(test)]
+mod login_mode_tests {
+    use super::*;
+
+    #[test]
+    fn resolve_flag_forces_no_login() {
+        // The explicit flag forces NoLogin regardless of TTY state — this is
+        // what mcp-aws-shell passes. No env mutation needed: the flag short-
+        // circuits before the TTY check.
+        assert_eq!(LoginMode::resolve(true), LoginMode::NoLogin);
+    }
+
+    #[test]
+    fn sso_login_required_display_names_the_url() {
+        let e = SsoLoginRequired {
+            sso_url: "https://d-abc.awsapps.com/start".to_string(),
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("https://d-abc.awsapps.com/start"), "{msg}");
+        assert!(msg.contains("SSO login required"), "{msg}");
+    }
+}
+
 /// Models for AWS API requests/responses
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,9 +295,10 @@ pub fn get_aws_credentials(
     region: &str,
     account_id: &str,
     role_name: &str,
+    login_mode: LoginMode,
 ) -> anyhow::Result<HashMap<String, SecretString>> {
     // 1-2. Obtain an SSO access token (cache, IPC lock, device flow)
-    let token = get_sso_token(backend, sso_url, region)?;
+    let token = get_sso_token(backend, sso_url, region, login_mode)?;
 
     // 3. Get Role Credentials
     let creds = get_role_credentials(token.expose_secret(), region, account_id, role_name)
@@ -241,22 +337,36 @@ fn read_cached_token(backend: &dyn KeyringBackend, token_key: &str) -> Option<Se
 ///
 /// This is the single token path shared by `aws-auth` and `aws-accounts`:
 /// 1. Use the keyring-cached token if it has more than 15 minutes left.
-/// 2. Otherwise take an exclusive IPC file lock in the temp dir so concurrent
+/// 2. Otherwise, in [`LoginMode::NoLogin`], return [`SsoLoginRequired`] without
+///    ever contacting the portal or opening a browser.
+/// 3. Otherwise take an exclusive IPC file lock in the temp dir so concurrent
 ///    launchers run at most one device authorization flow, re-check the cache,
 ///    and run the device flow (prompts go to stderr) if still needed.
-/// 3. Cache any newly issued token in the keyring.
+/// 4. Cache any newly issued token in the keyring.
 ///
 /// # Errors
-/// Returns an error if the lock file cannot be created or the OIDC client
+/// Returns [`SsoLoginRequired`] in [`LoginMode::NoLogin`] with no valid cached
+/// token, or an error if the lock file cannot be created or the OIDC client
 /// registration / device authorization flow fails.
 pub fn get_sso_token(
     backend: &dyn KeyringBackend,
     sso_url: &str,
     region: &str,
+    login_mode: LoginMode,
 ) -> anyhow::Result<SecretString> {
     let token_key = token_cache_key(sso_url);
     if let Some(token) = read_cached_token(backend, &token_key) {
         return Ok(token);
+    }
+
+    // No valid cached token. In NoLogin mode never start the interactive device
+    // flow: fail fast with a structured error so a headless caller (stdio MCP
+    // server) is never blocked on a browser prompt or a long poll.
+    if login_mode == LoginMode::NoLogin {
+        return Err(SsoLoginRequired {
+            sso_url: sso_url.to_string(),
+        }
+        .into());
     }
 
     // Use an IPC file lock to block concurrent device auth flows
@@ -957,8 +1067,9 @@ pub fn list_accounts_with_roles(
     sso_url: &str,
     region: &str,
     account_id: Option<&str>,
+    login_mode: LoginMode,
 ) -> anyhow::Result<Vec<AccountRoles>> {
-    let token = get_sso_token(backend, sso_url, region)?;
+    let token = get_sso_token(backend, sso_url, region, login_mode)?;
     // Resolve the portal URL on this thread: the test mock URL is thread-local.
     let base_url = get_portal_url(region);
     let agent = ureq::AgentBuilder::new().timeout(PORTAL_TIMEOUT).build();
@@ -1025,8 +1136,9 @@ pub fn aws_accounts_json(
     sso_url: &str,
     region: &str,
     account_id: Option<&str>,
+    login_mode: LoginMode,
 ) -> anyhow::Result<String> {
-    let accounts = list_accounts_with_roles(backend, sso_url, region, account_id)?;
+    let accounts = list_accounts_with_roles(backend, sso_url, region, account_id, login_mode)?;
     let failed = accounts.iter().filter(|a| a.roles_error.is_some()).count();
     if failed > 0 {
         eprintln!(
