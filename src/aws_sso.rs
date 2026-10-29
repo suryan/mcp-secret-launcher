@@ -497,6 +497,33 @@ fn get_or_register_client(
 }
 
 #[allow(clippy::too_many_lines)]
+/// Opens `url` in the user's browser WITHOUT letting the opener (or the browser
+/// it chains to) inherit this process's stdio.
+///
+/// Why this matters: when the launcher is spawned by a stdio MCP server, its
+/// own stdout is a pipe the server reads as JSON-RPC / the accounts envelope.
+/// `open::that` spawns the platform opener (e.g. `xdg-open`) inheriting
+/// stdout/stderr, so any banner the opener or browser prints lands in that pipe
+/// and corrupts the stream, closing the transport. We instead take the opener
+/// command(s) from the `open` crate and spawn them with stdin/stdout/stderr all
+/// redirected to null, so nothing the browser emits can ever reach the parent's
+/// stdout. Best-effort: failure to launch is ignored (the stderr instructions
+/// already tell the user how to open the URL manually).
+#[cfg(not(any(test, feature = "test-utils", debug_assertions)))]
+fn open_browser_detached(url: &str) {
+    use std::process::Stdio;
+    for mut cmd in open::commands(url) {
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        // Spawn (do not wait): the opener returns immediately and the browser
+        // runs independently. First one that launches wins.
+        if cmd.spawn().is_ok() {
+            break;
+        }
+    }
+}
+
 fn perform_device_authorization(
     client: &RegisterClientResponse,
     sso_url: &str,
@@ -549,7 +576,7 @@ fn perform_device_authorization(
     }
     #[cfg(not(any(test, feature = "test-utils", debug_assertions)))]
     {
-        let _ = open::that(verification_uri);
+        open_browser_detached(verification_uri);
     }
 
     eprintln!(
