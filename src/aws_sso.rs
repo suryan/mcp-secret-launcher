@@ -95,6 +95,43 @@ mod login_mode_tests {
         assert!(msg.contains("https://d-abc.awsapps.com/start"), "{msg}");
         assert!(msg.contains("SSO login required"), "{msg}");
     }
+
+    #[test]
+    fn session_status_login_required_without_cache() {
+        use crate::keyring_ops::MockKeyring;
+        let backend = MockKeyring::new();
+        let status = aws_session_status(&backend, "https://d-abc.awsapps.com/start");
+        assert_eq!(status.status, "login_required");
+        assert_eq!(
+            status.login_url.as_deref(),
+            Some("https://d-abc.awsapps.com/start")
+        );
+        assert!(status.expires_at.is_none());
+    }
+
+    #[test]
+    fn session_status_ok_with_valid_cached_token() {
+        use crate::keyring_ops::{KeyringBackend, MockKeyring};
+        let backend = MockKeyring::new();
+        let issued_at = now();
+        let expires_in = 3600_i64;
+        let cached = serde_json::json!({
+            "accessToken": "tok",
+            "expiresIn": expires_in,
+            "issuedAt": issued_at,
+        });
+        let key = token_cache_key("https://d-abc.awsapps.com/start");
+        backend
+            .set_secret(
+                PROFILE_NAME,
+                &key,
+                &secrecy::SecretString::from(cached.to_string()),
+            )
+            .unwrap();
+        let status = aws_session_status(&backend, "https://d-abc.awsapps.com/start");
+        assert_eq!(status.status, "ok", "{status:?}");
+        assert_eq!(status.expires_at, Some(issued_at + expires_in));
+    }
 }
 
 /// Models for AWS API requests/responses
@@ -323,6 +360,45 @@ fn read_cached_token(backend: &dyn KeyringBackend, token_key: &str) -> Option<Se
     // Requirement 4.3 and edge-case 2: Token valid if > 15 mins to expiration
     let expires_at = cached_token.issued_at + cached_token.expires_in;
     (expires_at > now() + (15 * 60)).then(|| SecretString::from(cached_token.access_token))
+}
+
+/// Result of a non-blocking SSO session probe.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionStatus {
+    /// `"ok"` when a usable cached token exists; `"login_required"` otherwise.
+    pub status: String,
+    /// Unix timestamp when the cached token expires (only when `status == "ok"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+    /// SSO start URL to open when login is required.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login_url: Option<String>,
+}
+
+/// Probe the keyring for a still-usable cached SSO token without starting device login.
+///
+/// Uses the same >15-minute validity threshold as [`get_sso_token`]. Never contacts
+/// the SSO portal and never opens a browser.
+#[must_use]
+pub fn aws_session_status(backend: &dyn KeyringBackend, sso_url: &str) -> SessionStatus {
+    let token_key = token_cache_key(sso_url);
+    if let Ok(secret) = backend.get_secret(PROFILE_NAME, &token_key)
+        && let Ok(cached) = serde_json::from_str::<CreateTokenResponse>(secret.expose_secret())
+    {
+        let expires_at = cached.issued_at + cached.expires_in;
+        if expires_at > now() + (15 * 60) {
+            return SessionStatus {
+                status: "ok".to_string(),
+                expires_at: Some(expires_at),
+                login_url: None,
+            };
+        }
+    }
+    SessionStatus {
+        status: "login_required".to_string(),
+        expires_at: None,
+        login_url: Some(sso_url.to_string()),
+    }
 }
 
 /// Returns a valid AWS SSO access token for `sso_url`.

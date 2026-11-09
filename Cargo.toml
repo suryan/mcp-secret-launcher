@@ -29,6 +29,7 @@ test-utils = []
 proptest = "1"
 mockito = "1"
 temp-env = "0.3.6"
+tempfile = "3"
 
 [lints.rust]
 unsafe_code = "deny"

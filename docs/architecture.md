@@ -23,6 +23,13 @@ Then:
 - `aws-accounts` calls `ListAccounts` and then `ListAccountRoles` per account (both
   paginated; roles fetched by up to 4 threads), and prints one JSON document on stdout. A
   repeated `nextToken` is treated as a portal bug and fails instead of looping.
+- `aws-run-with-secrets` assumes a role, fetches Secrets Manager / SSM values via the
+  AWS CLI (IDs from a JSON `--spec-file`), injects them as env vars or mode-0600 temp
+  files under a private temp dir, spawns the target with a **clean** environment,
+  redacts exact values (+ base64) from captured stdout/stderr, deletes the temp files,
+  and prints a JSON result envelope on stdout. Secret values never appear in argv or logs.
+- `aws-session-status` probes the cached SSO token only and prints
+  `ok` / `login_required` JSON — it never starts device authorization.
 - Portal requests (`portal_get`) retry HTTP 429, 5xx and network failures up to 7 attempts
   with full-jitter exponential backoff (250 ms base, 8 s cap), and honour `Retry-After`.
   401/403 are never retried. A final failure is a `PortalError` carrying the HTTP status,
@@ -50,9 +57,9 @@ Linux requires a running keyring daemon (e.g., `gnome-keyring-daemon`, KeePassXC
 
 ## Security
 
-- Secrets never touch disk, logs, or stdout (except masked via `get`)
+- Secrets never touch disk, logs, or stdout (except masked via `get`, and mode-0600
+  temp files created only by `aws-run-with-secrets` when `file: true`, deleted on exit)
 - All secret values wrapped in `secrecy::SecretString` with zeroize-on-drop
-- No temporary files created at any point
 - `set` uses non-echoing terminal input — no `--value` flag exists
 - On Windows, the env map is explicitly dropped/zeroized before waiting on the child process
 - Known limitation: on Linux, `/proc/[pid]/environ` exposes env vars to same-uid or root for the lifetime of the child process. This is an accepted tradeoff vs persistent plaintext files.
