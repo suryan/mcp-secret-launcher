@@ -40,12 +40,16 @@ echo "[2/4] cargo clippy --all-targets --all-features -- -D warnings"
 step "clippy" cargo clippy --all-targets --all-features -- -D warnings
 
 if cargo llvm-cov --version >/dev/null 2>&1; then
-  echo "[3/4] tests + coverage (min ${MIN_COVERAGE}% lines)"
+  echo "[3/4] tests + coverage (min ${MIN_COVERAGE}% lines; rustc warnings are errors)"
+  # llvm-cov sets cfg(coverage) and compiles without clippy; deny rustc warnings
+  # here so unused/dead_code under that cfg cannot slip through as non-fatal.
   step "tests + coverage >= ${MIN_COVERAGE}%" \
+    env CARGO_BUILD_RUSTFLAGS="-Dwarnings" \
     cargo llvm-cov --all-features --fail-under-lines "${MIN_COVERAGE}"
 else
   echo "[3/4] cargo test (cargo-llvm-cov not installed; CI still enforces ${MIN_COVERAGE}%)"
-  step "tests (coverage not measured)" cargo test --all-features
+  step "tests (coverage not measured)" \
+    env CARGO_BUILD_RUSTFLAGS="-Dwarnings" cargo test --all-features
 fi
 
 echo "[4/4] Security audit (osv-scanner)"

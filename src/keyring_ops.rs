@@ -4,9 +4,12 @@ use secrecy::{ExposeSecret, SecretString};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::errors::{LauncherError, categorize};
+use crate::errors::LauncherError;
+// Only the real `OsKeyring` impl (compiled when `cfg(coverage)` is off) uses these.
+#[cfg(not(coverage))]
+use crate::errors::categorize;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(coverage)))]
 fn check_linux_env() -> anyhow::Result<()> {
     if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
         return Err(LauncherError::KeyringUnavailable {
@@ -17,7 +20,7 @@ fn check_linux_env() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(not(target_os = "linux"), not(coverage)))]
 #[allow(clippy::unnecessary_wraps)]
 fn check_linux_env() -> anyhow::Result<()> {
     Ok(())
