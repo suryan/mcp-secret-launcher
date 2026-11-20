@@ -1,6 +1,8 @@
 direction: down
 
 classes: {
+  # Edge classes for the runtime sequence: solid green = synchronous.
+  sync: { style: { stroke: "#1a7f37"; stroke-width: 2 } }
   step: {
     style: {
       fill: "#f1f5f9"
@@ -262,4 +264,61 @@ set_store -> set_manifest {
 }
 set_manifest -> set_done {
   style: { stroke: "#10b981"; stroke-width: 2 }
+}
+
+# ============================================================
+#  AWS-ACCOUNTS COMMAND FLOW (runtime sequence)
+#  Legend: solid green = synchronous (caller blocks until the response).
+#  Every hop in this command is synchronous; parallelism comes from 4 worker threads.
+#  Each portal GET retries 429 / 5xx / network errors (7 attempts, full-jitter backoff
+#  250 ms..8 s, Retry-After honoured); 401/403 are never retried.
+# ============================================================
+
+aws_accounts: "'aws-accounts' runtime sequence (solid green = synchronous call)" {
+  shape: sequence_diagram
+
+  caller: "Caller\n(shell / MCP server)"
+  cli: "mcp-secret-launcher\naws-accounts"
+  keyring: "OS keyring\n(mcp-aws-sso)"
+  lock: 'IPC file lock ($TMPDIR/mcp-aws-sso-lock-*)'
+  oidc: "SSO OIDC\noidc.<region>"
+  portal: "SSO portal\nportal.sso.<region>"
+
+  caller -> cli: "aws-accounts --sso-url --region [--account-id]" { class: sync }
+  cli -> keyring: "read token:<sha256(sso_url)>" { class: sync }
+
+  token: "only if token missing or < 15 min left" {
+    cli -> lock: "lock_exclusive (waits for other launchers)" { class: sync }
+    cli -> keyring: "re-check cached token" { class: sync }
+    cli -> oidc: "POST /client/register (unless client cached)" { class: sync }
+    cli -> oidc: "POST /device_authorization" { class: sync }
+    cli -> caller: "stderr: verification URL + user code" { class: sync }
+    poll: "loop until approved or expired" {
+      cli -> oidc: "POST /token" { class: sync }
+    }
+    cli -> keyring: "store new token" { class: sync }
+    cli -> lock: "unlock" { class: sync }
+  }
+
+  accounts: "loop over nextToken pages" {
+    cli -> portal: "GET /assignment/accounts?max_result=100&next_token=" { class: sync }
+  }
+
+  cli -> cli: "NOTE: --account-id filters here, before any role lookup"
+
+  roles: "per account, up to 4 threads in parallel, each looping over nextToken" {
+    cli -> portal: "GET /assignment/roles?account_id=&max_result=100&next_token=" { class: sync }
+    retry: "on 429 / 5xx / network error: sleep (Retry-After or jitter), retry up to 7 attempts" {
+      cli -> portal: "GET /assignment/roles (retry)" { class: sync }
+    }
+  }
+
+  ok: "success (ListAccounts succeeded)" {
+    cli -> caller: "stdout: one JSON line, sorted by account_name; exit 0" { class: sync }
+    cli -> caller: "accounts whose roles still failed: roles: [], roles_error; one stderr warning" { class: sync }
+  }
+  fail: "ListAccounts failed, unknown --account-id, or any HTTP 401" {
+    cli -> keyring: "on HTTP 401 only: delete cached token" { class: sync }
+    cli -> caller: "stderr: Error ... HTTP <status> <AwsType> (after N attempts); exit 1; stdout empty" { class: sync }
+  }
 }

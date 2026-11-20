@@ -29,12 +29,18 @@ cargo build
 |--------|---------|
 | `scripts/install.sh` | macOS/Linux install-from-source (`--local`, `--with-path`, `--yes`) |
 | `scripts/setup-user.sh` | Write `path.env` and source it from bash/zsh rc files |
-| `scripts/check.sh` | Quality gate: format → clippy → tests (coverage if `cargo-llvm-cov` is installed) |
+| `scripts/precommit.sh` | Pre-commit gate: format → clippy → tests (95% coverage floor if `cargo-llvm-cov` is installed) → `osv-scanner` CVE audit |
+| `scripts/check.sh` | Quality gate without the CVE audit: format → clippy → tests |
 
 ```bash
 make help
-make precommit     # same as bash scripts/check.sh
+make precommit     # same as bash scripts/precommit.sh
 ```
+
+`scripts/precommit.sh` requires [osv-scanner](https://github.com/google/osv-scanner) and
+`python3`. It blocks on HIGH/CRITICAL (CVSS >= 7.0) findings that have a fixed version, and
+prints every other finding as accepted risk. A missing `osv-scanner` fails the gate; set
+`ALLOW_MISSING_OSV_SCANNER=1` to downgrade that to a warning on a local machine (never in CI).
 
 ## Dependencies
 
@@ -46,7 +52,21 @@ make precommit     # same as bash scripts/check.sh
 | `rpassword` v5 | Secure non-echoing terminal prompts |
 | `anyhow` | Error handling with context |
 | `thiserror` | Structured error types |
-| `serde_json` | Manifest serialization |
+| `serde_json` | Manifest serialization, `aws-accounts` JSON output |
+| `ureq` v2 | Blocking HTTPS client for the AWS SSO OIDC and portal APIs |
+| `fs4` | Cross-process file lock around the SSO device flow |
+
+### Testing the AWS SSO code
+
+All SSO tests are mocked with `mockito`; none reach AWS or open a browser.
+
+- In-process tests call `aws_sso::set_mock_url(Some(server.url()))`. The mock URL is
+  thread-local, so code that fans out to worker threads must resolve the portal URL on
+  the calling thread first (as `list_accounts_with_roles` does).
+- Binary-level tests (`tests/test_aws_accounts_binary.rs`) set `__MCP_TEST_MOCK_URL` on
+  the debug binary and a dummy `DBUS_SESSION_BUS_ADDRESS`, so the real keyring is never
+  touched. Both mock hooks exist only under `cfg(test)`, `feature = "test-utils"` or
+  `debug_assertions`; release builds always talk to AWS.
 
 ## Diagrams
 
@@ -74,9 +94,9 @@ cargo fmt
 cargo clippy --fix --allow-dirty --allow-staged
 ```
 
-**Quality gate (run before claiming a change is done):**
+**Quality gate (run before every commit):**
 ```bash
-bash scripts/check.sh
+bash scripts/precommit.sh
 # or: make precommit
 ```
 

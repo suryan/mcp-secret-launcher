@@ -1,8 +1,10 @@
 use crate::cli::Command;
 use crate::keyring_ops::{self, KeyringBackend};
 use crate::prompter::SecretPrompter;
-use crate::{aws_sso, masking, runner};
+use crate::{aws_sso, masking, run_with_secrets, runner};
 use secrecy::ExposeSecret;
+use std::path::Path;
+use std::time::Duration;
 
 /// Core execution logic for the MCP Secret Launcher.
 /// Extracted from `main.rs` to allow unit testing of the CLI logic.
@@ -38,6 +40,24 @@ pub fn run_app(
             }
         }
 
+        Command::AwsAccounts {
+            sso_url,
+            region,
+            account_id,
+            no_login,
+        } => {
+            // stdout carries only the JSON document; prompts and errors go to stderr.
+            let login_mode = aws_sso::LoginMode::resolve(no_login);
+            let json = aws_sso::aws_accounts_json(
+                backend,
+                &sso_url,
+                &region,
+                account_id.as_deref(),
+                login_mode,
+            )?;
+            println!("{json}");
+        }
+
         Command::Set { profile, key } => {
             let value = prompter.prompt_secret("Enter secret value: ")?;
             keyring_ops::store_secret(backend, &profile, &key, &value)?;
@@ -68,11 +88,19 @@ pub fn run_app(
             account_id,
             role_name,
             profile,
+            no_login,
             cmd,
         } => {
             // First load AWS credentials
-            let mut secrets =
-                aws_sso::get_aws_credentials(backend, &sso_url, &region, &account_id, &role_name)?;
+            let login_mode = aws_sso::LoginMode::resolve(no_login);
+            let mut secrets = aws_sso::get_aws_credentials(
+                backend,
+                &sso_url,
+                &region,
+                &account_id,
+                &role_name,
+                login_mode,
+            )?;
 
             // Then merge with profile secrets if specified
             if let Some(p) = profile {
@@ -100,6 +128,42 @@ pub fn run_app(
                     std::process::exit(code);
                 }
             }
+        }
+
+        Command::AwsRunWithSecrets {
+            sso_url,
+            region,
+            account_id,
+            role_name,
+            aws_region,
+            cwd,
+            spec_file,
+            inject_aws_credentials,
+            no_login,
+            timeout_secs,
+            cmd,
+        } => {
+            let aws_region = aws_region.unwrap_or_else(|| region.clone());
+            let login_mode = aws_sso::LoginMode::resolve(no_login);
+            let req = run_with_secrets::RunWithSecretsRequest {
+                sso_url: &sso_url,
+                sso_region: &region,
+                account_id: &account_id,
+                role_name: &role_name,
+                aws_region: &aws_region,
+                cwd: Path::new(&cwd),
+                spec_file: Path::new(&spec_file),
+                inject_aws_credentials,
+                login_mode,
+                cmd: &cmd,
+                timeout: timeout_secs.map(Duration::from_secs),
+            };
+            run_with_secrets::run(backend, &req)?;
+        }
+
+        Command::AwsSessionStatus { sso_url, region: _ } => {
+            let status = aws_sso::aws_session_status(backend, &sso_url);
+            println!("{}", serde_json::to_string(&status)?);
         }
     }
 

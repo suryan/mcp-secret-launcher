@@ -85,7 +85,7 @@ Launcher: mcp-secret-launcher {
   class: highlight
 
   CLI Parser: "(clap)" {
-    tooltip: "Parses subcommands: run, set, get, list, delete"
+    tooltip: "Parses subcommands: run, aws-auth, aws-accounts, set, get, list, delete"
   }
 
   Command Dispatch: main::run() {
@@ -125,7 +125,18 @@ Launcher: mcp-secret-launcher {
     |
   }
 
+  AWS SSO: aws_sso {
+    tooltip: |md
+      - get_sso_token: keyring cache (15 min margin) → IPC file lock → device flow
+      - get_aws_credentials: GetRoleCredentials (aws-auth)
+      - list_accounts_with_roles: ListAccounts + ListAccountRoles, 4 threads, jittered retry of 429/5xx/network, per-account roles_error (aws-accounts)
+      - HTTP 401 → delete cached token
+    |
+  }
+
   CLI Parser -> Command Dispatch: Parsed Command
+  Command Dispatch -> AWS SSO: aws-auth / aws-accounts
+  AWS SSO -> Keyring Ops: cached OIDC client + SSO token
   Command Dispatch -> Keyring Ops: run / set / get / delete / list
   Command Dispatch -> Runner: run (after secrets loaded)
   Command Dispatch -> Masking: get (mask output)
@@ -213,4 +224,30 @@ Launcher.Runner -> Target: exec (Unix) / spawn (Windows)\nwith injected env vars
     stroke-width: 2
     animated: true
   }
+}
+
+AWS: AWS IAM Identity Center {
+  class: box
+  OIDC: "oidc.<region>.amazonaws.com" {
+    icon: https://icons.terrastruct.com/aws%2FSecurity%2C%20Identity%2C%20&%20Compliance%2FAWS-Single-Sign-On.svg
+    tooltip: "RegisterClient, StartDeviceAuthorization, CreateToken"
+  }
+  Portal: "portal.sso.<region>.amazonaws.com" {
+    icon: https://icons.terrastruct.com/aws%2FSecurity%2C%20Identity%2C%20&%20Compliance%2FAWS-Single-Sign-On.svg
+    tooltip: "GetRoleCredentials, ListAccounts, ListAccountRoles"
+  }
+}
+
+Caller: "Calling program\n(e.g. AWS shell MCP server)" {
+  class: box
+}
+
+Launcher.AWS SSO -> AWS.OIDC: device authorization flow (HTTPS) {
+  style: { stroke: "#6366f1" }
+}
+Launcher.AWS SSO -> AWS.Portal: x-amz-sso_bearer_token (HTTPS) {
+  style: { stroke: "#6366f1" }
+}
+Caller -> Launcher.CLI Parser: aws-accounts (JSON on stdout) {
+  style: { stroke: "#64748b"; stroke-dash: 5 }
 }

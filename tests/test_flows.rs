@@ -103,7 +103,7 @@ fn test_empty_profile_list_returns_empty() -> anyhow::Result<()> {
     let keyring = MockKeyring::new();
     // No manifest set for "empty-profile" at all
     let result = keyring_ops::list_keys_with_healing(&keyring, "empty-profile")?;
-    assert!(result.is_empty());
+    assert_eq!(result, Vec::<String>::new());
     Ok(())
 }
 
@@ -114,7 +114,7 @@ fn test_empty_manifest_list_returns_empty() -> anyhow::Result<()> {
     let keyring = MockKeyring::new();
     keyring.set_manifest("some-profile", &[])?;
     let result = keyring_ops::list_keys_with_healing(&keyring, "some-profile")?;
-    assert!(result.is_empty());
+    assert_eq!(result, Vec::<String>::new());
     Ok(())
 }
 

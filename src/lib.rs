@@ -5,6 +5,8 @@
 
 /// Core application logic and command handlers.
 pub mod app;
+/// Fetch Secrets Manager / SSM values via the AWS CLI.
+pub mod aws_fetch;
 /// AWS SSO credential retrieval and caching.
 pub mod aws_sso;
 /// CLI argument definition and parsing.
@@ -17,8 +19,14 @@ pub mod keyring_ops;
 pub mod masking;
 /// Trait and implementations for secure user prompts.
 pub mod prompter;
+/// Redact secret values from captured child output.
+pub mod redact;
+/// Orchestrate aws-run-with-secrets (fetch, inject, redact, JSON result).
+pub mod run_with_secrets;
 /// Logic for spawning and executing child processes.
 pub mod runner;
+/// JSON specification for aws-run-with-secrets (IDs only).
+pub mod spec;
 
 /// Re-export of the main application entry point.
 pub use app::run_app;

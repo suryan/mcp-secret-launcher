@@ -107,6 +107,7 @@ fn test_run_app_aws_auth_command() {
         account_id: "123".to_string(),
         role_name: "MyRole".to_string(),
         profile: Some("default".to_string()),
+        no_login: false,
         cmd: vec!["true".to_string()],
     };
 
@@ -121,6 +122,7 @@ fn test_run_app_aws_auth_command() {
         account_id: "123".to_string(),
         role_name: "MyRole".to_string(),
         profile: None,
+        no_login: false,
         cmd: vec!["true".to_string()],
     };
     temp_env::with_var("__MCP_TEST_NO_EXEC", Some("1"), || {

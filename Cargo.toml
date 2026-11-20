@@ -29,9 +29,13 @@ test-utils = []
 proptest = "1"
 mockito = "1"
 temp-env = "0.3.6"
+tempfile = "3"
 
 [lints.rust]
 unsafe_code = "deny"
+# Fail the build on unused/dead_code (incl. cargo llvm-cov's plain rustc path;
+# clippy already uses -D warnings, but coverage compiles without clippy).
+unused = { level = "deny", priority = -1 }
 missing_docs = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)', 'cfg(coverage)'] }

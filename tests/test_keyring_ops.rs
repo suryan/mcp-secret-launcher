@@ -111,7 +111,7 @@ fn test_mock_keyring_manifest_round_trip() -> anyhow::Result<()> {
 fn test_mock_keyring_get_manifest_empty_when_missing() -> anyhow::Result<()> {
     let keyring = MockKeyring::new();
     let result = keyring.get_manifest("nonexistent")?;
-    assert!(result.is_empty());
+    assert_eq!(result, Vec::<String>::new());
     Ok(())
 }
 
@@ -226,7 +226,7 @@ fn test_delete_secret_key_not_in_manifest_is_ok() -> anyhow::Result<()> {
     // Delete should remove from keyring, manifest stays empty
     delete_secret(&keyring, "prof", "ORPHAN")?;
     assert!(keyring.get_secret("prof", "ORPHAN").is_err());
-    assert!(keyring.get_manifest("prof")?.is_empty());
+    assert_eq!(keyring.get_manifest("prof")?, Vec::<String>::new());
     Ok(())
 }
 

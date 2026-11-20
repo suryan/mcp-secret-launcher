@@ -156,6 +156,57 @@ mcp-secret-launcher aws-auth \
   -- uvx mcp-aws
 ```
 
+### List the AWS accounts and roles you can access
+
+`aws-accounts` signs in the same way as `aws-auth` (it reuses the cached SSO token, and runs
+the browser device flow only when the token is missing or has under 15 minutes left), then
+prints every account assigned to you with your role names in it:
+
+```bash
+mcp-secret-launcher aws-accounts \
+  --sso-url https://my-sso-portal.awsapps.com/start \
+  --region us-east-1
+```
+
+```json
+{"accounts":[{"account_id":"123456789012","account_name":"dev","email":"aws-dev@example.com","roles":["power-user","read-only"]}]}
+```
+
+- stdout holds exactly one JSON line, so it is safe to pipe into `jq` or parse from
+  another program. Device-login prompts, warnings and errors go to stderr.
+- Accounts are sorted by `account_name`, then `account_id`. Each `roles` list is sorted and
+  de-duplicated. An account with no roles has `"roles": []`; a missing name or email is `""`.
+- `--account-id 123456789012` returns just that account (and fetches roles only for it).
+  If the account is not assigned to you, the command fails.
+- **Partial results.** If one account's roles still cannot be listed after retries, that
+  account stays in the output with `"roles": []` and a `"roles_error"` string, and the
+  command still exits 0. stderr gets one line such as
+  `Warning: roles could not be listed for 2 of 58 account(s); see "roles_error" in the output`.
+  `roles_error` is absent on every account whose roles were listed, so existing parsers
+  keep working:
+
+  ```json
+  {"accounts":[{"account_id":"299000394808","account_name":"sec","email":"s@example.com","roles":[],"roles_error":"ListAccountRoles for account 299000394808 failed: HTTP 429 TooManyRequestsException: Rate exceeded (after 7 attempts)"}]}
+  ```
+- On failure the exit code is non-zero, stdout is empty, and stderr says why. That happens
+  when sign-in fails, `ListAccounts` itself fails, `--account-id` is not assigned to you, or
+  the portal rejects the token (HTTP 401) on any call. A 401 deletes the cached token, and
+  stderr asks you to rerun the command.
+- Error messages name the HTTP status, the AWS error type when the portal sends one, and
+  the number of attempts, for example `HTTP 503 (after 7 attempts)` or
+  `transport error: ... (after 7 attempts)`.
+
+It calls the IAM Identity Center portal API on `https://portal.sso.<region>.amazonaws.com`:
+`ListAccounts` (`GET /assignment/accounts`) and, for each account, `ListAccountRoles`
+(`GET /assignment/roles`). Both follow `nextToken` pagination (100 per page). Role lookups
+run up to 4 at a time.
+
+Every portal request retries HTTP 429, HTTP 5xx and network failures (DNS, connection,
+I/O and timeouts) up to 7 attempts in total, with full-jitter exponential backoff (a random
+wait between 0 and `min(8 s, 250 ms * 2^n)`). When the portal sends `Retry-After` (seconds),
+that wait is used instead, capped at 20 s. HTTP 401, 403 and other 4xx answers are never
+retried.
+
 ## MCP JSON Integration
 
 ### Example: Securing `mcp-atlassian`
